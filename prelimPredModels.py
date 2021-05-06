@@ -1,6 +1,3 @@
-
-
-
 from warnings import simplefilter
 # ignore all future warnings
 simplefilter(action='ignore', category=FutureWarning)
@@ -19,25 +16,29 @@ from sklearn.metrics import roc_curve
 import statsmodels.api as sm
 from imblearn.over_sampling import SMOTE
 from sklearn import svm
-
-
-
-
-
+import gseapy
 
 ###################################################
 # This script uses logistic regression for the incidence of ORN
 # (yes or no) and considers no grade or Dur_to_ORN in the analysis.
 ###################################################
 
-
+def do_gene_enrichment(gene_df, dataname):
+    '''
+    This function consumes a data frame of gene names and values and uses the
+    `gseapy` package to assess any function in the genes selected
+    '''
+    gl = gene_df.sort_values(by='value', ascending=False)['gene']
+    res = gseapy.enrichr(gene_list=gl, description='pathway', gene_sets='KEGG_2016', outdir='test')
+    print(res)
+    return res
 
 def prepareData(datapath_prot):
     # Reading the proteomic dataset
     ###################################################
-    datapath_prot = "/.../Data/S054_HNSCC_imputed_0920.csv"
+    datapath_prot = "data/S054_HNSCC_imputed_0920.tsv"
 
-    df_prot = pd.read_csv(datapath_prot, header=None)
+    df_prot = pd.read_csv(datapath_prot, header=None, sep='\t')
     data_top = df_prot.head()
     #pIDs =df.index        # Patient IDs
     df_prot = df_prot.transpose()
@@ -69,12 +70,12 @@ def prepareData(datapath_prot):
 
 
     #--Adding case_id to df_prot: this means cutting -T or -N from pID
-    case_id = df_prot['pID'].tolist()
-    i = 0
-    for str in case_id:
-        str = str[:-2]
-        case_id[i] = str.strip()
-        i = i+1
+    case_id = [str[:-2].strip() for str in df_prot['pID'].tolist()]
+    #i = 0
+    #for str in case_id:
+    #    str = str[:-2]
+    #    case_id[i] = str.strip()
+    #    i = i+1
     df_prot['case_id'] = case_id
 
     #df_prot.columns = df_prot.columns.str.replace(' ', '')
@@ -85,12 +86,15 @@ def prepareData(datapath_prot):
     cols =  cols.insert(0, 'pID')
     df_prot = df_prot.reindex(columns = cols)
 
-
     # Reading the target variables
     ###################################################
-    datapath_target = "/.../Data/HNSCC_Feb2021_clinical_data.csv"
+    datapath_target = "data/HNSCC_Feb2021_clinical_data.csv"
     df_target = pd.read_csv(datapath_target)
+    target_cols = ['case_id','baseline/lymph_nodes_extranodal_extension',\
+                 'baseline/lymph_vascular_invasion',\
+                 'baseline/number_of_lymph_nodes_positive_for_tumor_by_he']
 
+    df_target = df_target[target_cols]
     # Merging the datasets
     ###################################################
     df_main = pd.merge(df_prot, df_target, on=["case_id"])
@@ -100,16 +104,16 @@ def prepareData(datapath_prot):
     #      baseline_lymph_vascular_invasion,
     #      baseline_number_of_lymph_nodes_positive_for_tumor_by_he
 
-    cols = df_main.columns
-    cols = cols[:-3].insert(2, 'baseline_lymph_nodes_extranodal_extension')
-    cols = cols.insert(3, 'baseline_lymph_vascular_invasion')
-    cols = cols.insert(4, 'baseline_number_of_lymph_nodes_positive_for_tumor_by_he')
-    df_main = df_main.reindex(columns = cols)
+   # cols = df_prot.columns
+   # cols = cols[:-3].insert(2, 'baseline_lymph_nodes_extranodal_extension')
+   # cols = cols.insert(3, 'baseline_lymph_vascular_invasion')
+   # cols = cols.insert(4, 'baseline_number_of_lymph_nodes_positive_for_tumor_by_he')
+   # df_main = df_main.reindex(columns = cols)
 
     #--Renaming the target columns
-    df_main.rename(columns={"baseline_lymph_nodes_extranodal_extension": "ExtraNodalExtension",
-                            "baseline_lymph_vascular_invasion": "VasInv",
-                            "baseline_number_of_lymph_nodes_positive_for_tumor_by_he": "numLymphPositiveForTumor"},
+    df_main.rename(columns={"baseline/lymph_nodes_extranodal_extension": "ExtraNodalExtension",\
+                            "baseline/lymph_vascular_invasion": "VasInv",\
+                            "baseline/number_of_lymph_nodes_positive_for_tumor_by_he": "numLymphPositiveForTumor"},\
                    errors="raise", inplace = True)
 
     ###################################################
@@ -130,17 +134,17 @@ def buildBinClassifier(df_main,
         print("Choose exactly one target variable.\n")
         return -1
 
+    all_targs = ['pID','case_id','VasInv','ExtraNodalExtension','numLymphPositiveForTumor']
 
     if (ExtraNodalExtension_switch == True):
-        target_col_to_be_dropped = 'VasInv'
+        #target_col_to_be_dropped = 'VasInv'
         target_col = 'ExtraNodalExtension'
     else:
-        target_col_to_be_dropped = 'ExtraNodalExtension'
+        #target_col_to_be_dropped = 'ExtraNodalExtension'
         target_col ='VasInv'
 
-    df = df_main.drop(columns=[target_col_to_be_dropped,
-                               'numLymphPositiveForTumor',
-                               'pID', 'case_id'])
+    #drop everything BUT the target column
+    df = df_main.drop(columns=[a for a in all_targs if a != target_col])
 
     # Next, we get rid of "Indeterminate" labels
     df = df[df[target_col] != 'Indeterminate']
@@ -148,6 +152,7 @@ def buildBinClassifier(df_main,
     # Setting up labels
     df[target_col].replace('Not identified', '0', inplace=True)
     df[target_col].replace('Present', '1', inplace=True)
+   # print(df[target_col])
     df = df.astype({target_col: 'int32'})
 
     # setting up y and X
@@ -212,7 +217,6 @@ def buildBinClassifier(df_main,
         from sklearn.metrics import classification_report
         print(classification_report(y_test, y_pred))
 
-
         from sklearn import metrics
         metrics.plot_roc_curve(logreg, X_test, y_test)
         plt.plot([0, 1], [0, 1],'r--')
@@ -232,6 +236,10 @@ def buildBinClassifier(df_main,
         plt.title('Log Regression ROC '+titleStr)
         plt.legend(loc="lower right")
         plt.show()
+
+        #now get gene sets
+        genevals = pd.DataFrame({'value':logreg.coef_[0],'gene':X.columns})
+        do_gene_enrichment(genevals,titleStr)
 
     if (SVM_switch==True):
         weights = {0: 1.00, 1: 1.00}
