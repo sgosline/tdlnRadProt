@@ -29,7 +29,8 @@ def do_gene_enrichment(gene_df, dataname):
     `gseapy` package to assess any function in the genes selected
     '''
     gl = gene_df.sort_values(by='value', ascending=False)['gene']
-    res = gseapy.enrichr(gene_list=gl, description='pathway', gene_sets='KEGG_2016', outdir='test')
+    res = gseapy.enrichr(gene_list=gl, description='pathway', gene_sets='KEGG_2016', \
+                         outdir=dataname)
     print(res)
     return res
 
@@ -249,8 +250,9 @@ def buildBinClassifier(df_main,
             numZeroLabel = np.shape(y_train) - numOneLabel
             weights = {0: (numOneLabel + numZeroLabel)/numZeroLabel, 1: (numOneLabel + numZeroLabel)/numOneLabel}
 
-        svm_model = svm.SVC(kernel='poly', degree=2, class_weight=weights)
+        svm_model = svm.SVC(kernel='linear', degree=2, class_weight=weights)
         svm_model.fit(X_train, y_train.values.ravel())
+        ##I'm not sure how to get the weights of the genes from this model
 
         y_pred = svm_model.predict(X_test)
         print('Accuracy of SVM on test set: {:.2f}'.format(svm_model.score(X_test, y_test)))
