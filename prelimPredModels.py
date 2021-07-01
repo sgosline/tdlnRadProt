@@ -18,10 +18,7 @@ from imblearn.over_sampling import SMOTE
 from sklearn import svm
 import gseapy
 
-###################################################
-# This script uses logistic regression for the incidence of ORN
-# (yes or no) and considers no grade or Dur_to_ORN in the analysis.
-###################################################
+
 
 def do_gene_enrichment(gene_df, dataname):
     '''
@@ -288,6 +285,115 @@ def buildBinClassifier(df_main,
         plt.legend(loc="lower right")
         plt.show()
 
+def prepareData_combinedWithSegmentation(datapath_prot):
+    # Reading the proteomic dataset
+    ###################################################
+    datapath_prot = "data/S054_HNSCC_imputed_0920.csv"
+
+    df_prot = pd.read_csv(datapath_prot, header=None)
+    data_top = df_prot.head()
+    #pIDs =df.index        # Patient IDs
+    df_prot = df_prot.transpose()
+    new_header = df_prot.iloc[0]
+    df_prot = df_prot[1:]
+    df_prot.columns = new_header
+    df_prot = df_prot.rename(columns={df_prot.columns[0]: "pID"})
+    df_prot.reindex
+
+    # Cleaning the data and adding case_id
+    ###################################################
+    #--Removing meaningless pIDs
+    pIDsToBeRemoved = ['Channel 128C', 'QC2', "QC3", "QC4",
+                       "C3L-02617-T-duplicate", "Channel 129N",
+                       "LungTumor1", "Pooled-sample14", "LungTumor2",
+                       "QC6", "LungTumor3", "Pooled-sample17", "QC7",
+                       "Pooled-sample19"]
+    pIDsToBeRemoved_indices = [4, 34, 62, 81, 91, 115, 121, 133, 142, 147, 166,
+                               170, 178, 187]
+
+    df_prot.drop(index=pIDsToBeRemoved_indices, inplace = True)
+
+    #--Removing spaces from pID
+    pID = pd.Series(data = df_prot['pID'])
+    pID = pID.str.strip()
+    pID = pID.str.replace(' ', '', regex=False)
+    df_prot.drop(columns=['pID'], inplace=True)
+    df_prot['pID'] = pID.to_list()
+
+
+    #--Adding case_id to df_prot: this means cutting -T or -N from pID
+    case_id = df_prot['pID'].tolist()
+    i = 0
+    for str in case_id:
+        str = str[:-2]
+        case_id[i] = str.strip()
+        i = i+1
+    df_prot['case_id'] = case_id
+
+    #df_prot.columns = df_prot.columns.str.replace(' ', '')
+
+    #--Reindexing columns to have pID, case_id, ...
+    cols = df_prot.columns
+    cols =  cols[:-2].insert(0, 'case_id')
+    cols =  cols.insert(0, 'pID')
+    df_prot = df_prot.reindex(columns = cols)
+
+
+    # Reading the target variables
+    ###################################################
+    datapath_target = "data/HNSCC_Feb2021_clinical_data.csv"
+    df_target = pd.read_csv(datapath_target)
+
+    # Merging the datasets
+    ###################################################
+    df_main = pd.merge(df_prot, df_target, on=["case_id"])
+
+    #--Reindexing columns to have pID, case_id,
+    #      baseline_lymph_nodes_extranodal_extension,
+    #      baseline_lymph_vascular_invasion,
+    #      baseline_number_of_lymph_nodes_positive_for_tumor_by_he
+
+    cols = df_main.columns
+    cols = cols[:-3].insert(2, 'baseline_lymph_nodes_extranodal_extension')
+    cols = cols.insert(3, 'baseline_lymph_vascular_invasion')
+    cols = cols.insert(4, 'baseline_number_of_lymph_nodes_positive_for_tumor_by_he')
+    df_main = df_main.reindex(columns = cols)
+
+    #--Renaming the target columns
+    df_main.rename(columns={"baseline_lymph_nodes_extranodal_extension": "ExtraNodalExtension",
+                            "baseline_lymph_vascular_invasion": "VasInv",
+                            "baseline_number_of_lymph_nodes_positive_for_tumor_by_he": "numLymphPositiveForTumor"},
+                   errors="raise", inplace = True)
+
+    #############################################################
+    # Now, we augment df_main with the features from segmentation.
+    #############################################################
+    datapath_segment = "data/Segment/cptac_hnc_pyrad_features_v2.csv"
+    df_segment = pd.read_csv(datapath_segment, header=None)
+    df_segment = df_segment.transpose()
+    header1 = df_segment.iloc[0]
+    header2 = df_segment.iloc[1]
+    for i in range(0, np.shape(header1)[0]):
+        header2.iloc[i] = header1.iloc[i] + " " + header2.iloc[i]
+
+    df_segment = df_segment[2:]
+    df_segment.columns = header2
+    df_segment = df_segment.rename(columns={df_segment.columns[0]: "case_id"})
+    df_segment.reindex
+
+
+
+
+    df_main = pd.merge(df_main, df_segment, on=["case_id"])
+    print("df_main\n")
+    return df_main
+
+
+    ###################################################
+    # At this time, df is ready for ML. It contains three target variables,
+    # we make sure that we work with only one of them.
+    ###################################################
+    return df_main
 
 
 
