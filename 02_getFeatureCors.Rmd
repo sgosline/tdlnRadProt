@@ -1,7 +1,7 @@
 ---
-title: "HNSCC Proteomics Plotting"
+title: "HNSCC Imaging feature correlation"
 author: "Sara Gosline"
-date: "6/30/2021"
+date: "7/1/2021"
 output: html_document
 ---
 
@@ -17,32 +17,16 @@ The goal of this analysis is to ascertain the expression of key proteins in the 
 
 ```{r load data, echo=FALSE,warning=FALSE}
 source("loadHNSCCdata.R")
-
-res=data.frame(`Stats`=c('total proteins','proteins in list','total samples','total with normal and tumor'),
-           `Number`=c(length(unique(impProts$Gene)),length(intersect(invList$Symbol,fullProts$Gene)),
-                       ncol(impProts)-1,length(unique(fullProts$patient))))
-
-print(res)
 ```
 Now that we have the genes and the samples aligned we can begin to analyze them more broadly.
 
 
-## Visualize samples by patient clustered by tumor abundance
+## Compute correlations between genes and imaging features
 
 We now want to see how the patients fall across the various variables. We start by plotting raw tumor abundance, then compute differences between tumor/normal.
-
 ```{r pcaplot, echo=FALSE}
 
 
-##quick function to do PCA on a column value
-pcaFromDf<-function(df,column){
-  mat <-df%>%
-    dplyr::select('Gene','patient',column)%>%
-    pivot_wider(names_from='patient',values_from=column)%>%
-    tibble::column_to_rownames('Gene')%>%
-    as.matrix()
-  return(data.frame(prcomp(t(mat))$x)%>%tibble::rownames_to_column('patient'))
-}
 
 ##let's first do a PCA plotted with positive lns
 tumAbund <- pcaFromDf(fullProts,'inferredTumAbund')%>%
