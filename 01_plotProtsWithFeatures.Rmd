@@ -16,57 +16,7 @@ library(gridExtra)
 The goal of this analysis is to ascertain the expression of key proteins in the HSNCC dataset that could give rise to imaging features.
 
 ```{r load data, echo=FALSE,warning=FALSE}
-library(readxl)
-library(dplyr)
-library(tidyr)
-##read in imaging features 
-imgFeat <-readxl::read_xlsx('data/cptac_hnc_pyrad_features_v2.xlsx')
-##convert to long format
-imgFeat <- imgFeat %>%
-  pivot_longer(3:ncol(imgFeat),names_to='patient',values_to='value')
-
-##read in proteomics
-impProts <- read.table('data/S054_HNSCC_imputed_0920.tsv',sep='\t',header=T,check.names=F)
-
-##convert to long format
-tumProts <- impProts%>%
-  dplyr::select(Gene,ends_with('-T')) 
-
-##convert to long format
-normProts <- impProts%>%
-  dplyr::select(Gene,ends_with('-N'))
-
-normProts <- normProts%>%
-  pivot_longer(2:ncol(normProts),names_to='patient',values_to='inferredNormAbund')%>%
-  mutate(patient=stringr::str_remove(patient,'-N'))
-
-tumProts <- tumProts%>%
-  pivot_longer(2:ncol(tumProts),names_to='patient',values_to='inferredTumAbund')%>%
-  mutate(patient=stringr::str_remove(patient,'-T'))
-
-
-##can we get lcinical too?
-clin.dat<-read.table('data/HNSCC_Feb2021_clinical_data.csv',sep=',',header=T,check.names=F,quote='"')%>%
-  dplyr::select(case_id,contains("lymph_node"))%>%### this gets us 8 different categories
-  rename(extranodal_extension="baseline/lymph_nodes_extranodal_extension",
-         staging="baseline/pathologic_staging_regional_lymph_nodes_pn",
-         dissection_performed="baseline/lymph_node_neck_dissection_performed",
-         dissection_left="baseline/method_of_lymph_node_neck_dissection_left",
-         dissection_right="baseline/method_of_lymph_node_neck_dissection_right",
-         ln_examined="baseline/number_of_lymph_nodes_examined",
-        positive_by_he="baseline/number_of_lymph_nodes_positive_for_tumor_by_he",
-        postiive_by_ihc="baseline/number_of_lymph_nodes_positive_for_tumor_by_ihc_staining_only",
-        patient='case_id')%>%
-  mutate(frac_ln=positive_by_he/ln_examined)
-
-##now combine the abundances to the same table
-fullProts <- normProts%>%inner_join(tumProts,by=c('Gene','patient'))%>%
-  mutate(tumNormDiff=inferredTumAbund/inferredNormAbund)%>%
-  left_join(clin.dat,by='patient')
-
-
-## read in gene list
-invList <-read.table('data/pouliquenEtAlProteins.tsv',sep='\t',header=T,check.names=F)
+source("loadHNSCCdata.R")
 
 res=data.frame(`Stats`=c('total proteins','proteins in list','total samples','total with normal and tumor'),
            `Number`=c(length(unique(impProts$Gene)),length(intersect(invList$Symbol,fullProts$Gene)),
@@ -79,9 +29,9 @@ Now that we have the genes and the samples aligned we can begin to analyze them 
 
 ## Visualize samples by patient clustered by tumor abundance
 
-We now want to see how the patients fall across the various variables. We start by plotting raw tumor abundance, then compute differences between tumor/normal.
-```{r pcaplot, echo=FALSE}
+We now want to see how the patients fall across the various variables. We start by plotting raw tumor abundance, raw normal abundance, then compute differences between tumor/normal.
 
+```{r pcaplot, warning=FALSE}
 
 ##quick function to do PCA on a column value
 pcaFromDf<-function(df,column){
@@ -95,27 +45,43 @@ pcaFromDf<-function(df,column){
 
 ##let's first do a PCA plotted with positive lns
 tumAbund <- pcaFromDf(fullProts,'inferredTumAbund')%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
 
 ##all proteins
 ggplot(tumAbund)+
-  geom_point(aes(x=PC1,y=PC2,col=ln_examined,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
   ggtitle('All proteins tumor expression')
+
+
+normAbund <- pcaFromDf(normProts,'inferredNormAbund')%>%
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
+##now let's plot ll proteins normal expression
+ggplot(normAbund)+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
+  ggtitle('All proteins normal expression')
 
 ##let's first do a PCA plotted with positive lns
 tumNorm <- pcaFromDf(fullProts,'tumNormDiff')%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
 
 ##all proteins
 ggplot(tumNorm)+
-  geom_point(aes(x=PC1,y=PC2,col=ln_examined,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=ln_examined))+
   ggtitle('Tumor vs. normal all proteins')
 
 ```
 
 
 ## Selected invasion proteins
-Do we see any difference  in clustering/staining with invasivity?
+We have a set of proteins that are known to be related to invasivity - do they cluster the samples any better? 
+
+Do we see any difference  in clustering/staining with invasivity
 
 ```{r pcaplot2, echo=FALSE}
 
@@ -124,20 +90,34 @@ redProts <- fullProts%>%
 
 ##let's first do a PCA plotted with positive lns
 tumAbund <- pcaFromDf(redProts,'inferredTumAbund')%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.dat,by='patient')%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')
 
 ##all proteins
 ggplot(tumAbund)+
-  geom_point(aes(x=PC1,y=PC2,col=ln_examined,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
   ggtitle('Invasive proteins tumor expression')
+
+normAbund <-pcaFromDf(redProts,'inferredNormAbund')%>%
+    left_join(clin.dat,by='patient')%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
+ggplot(normAbund)+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
+  ggtitle('Invasive proteins normal expression')
+
 
 ##let's first do a PCA plotted with positive lns
 tumNorm <- pcaFromDf(redProts,'tumNormDiff')%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
 
 ##all proteins
 ggplot(tumNorm)+
-  geom_point(aes(x=PC1,y=PC2,col=ln_examined,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
   ggtitle('Tumor vs. normal invasive proteins')
 
 ```
+
+
+## Conclusion
+There is no clear separation between samples based on all proteins or invasive proteins.
