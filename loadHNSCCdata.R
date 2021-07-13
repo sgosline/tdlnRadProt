@@ -44,10 +44,20 @@ clin.dat<-read.table('data/HNSCC_Feb2021_clinical_data.csv',sep=',',header=T,che
   subset(staging!='')%>%
   mutate(staging=toupper(staging))
 
+
+
+##reduced clinical data
+red.dat<-clin.dat%>%
+  select(patient,staging,positive_by_he)
+
+red.dat$lnCounts<-sapply(red.dat$positive_by_he,function(x) ifelse(x==0,'zeroLN',ifelse(x>2,'moreThanTwo','oneOrTwo')))
+
+
 ##now combine the abundances to the same table
 fullProts <- normProts%>%inner_join(tumProts,by=c('Gene','patient'))%>%
   mutate(tumNormDiff=inferredTumAbund/inferredNormAbund)%>%
   left_join(clin.dat,by='patient')
+
 
 ##helper functions
 ##quick function to do PCA on a column value
