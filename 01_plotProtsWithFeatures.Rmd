@@ -29,10 +29,9 @@ Now that we have the genes and the samples aligned we can begin to analyze them 
 
 ## Visualize samples by patient clustered by tumor abundance
 
-We now want to see how the patients fall across the various variables. We start by plotting raw tumor abundance, then compute differences between tumor/normal.
+We now want to see how the patients fall across the various variables. We start by plotting raw tumor abundance, raw normal abundance, then compute differences between tumor/normal.
 
-```{r pcaplot, echo=FALSE}
-
+```{r pcaplot, warning=FALSE}
 
 ##quick function to do PCA on a column value
 pcaFromDf<-function(df,column){
@@ -46,27 +45,43 @@ pcaFromDf<-function(df,column){
 
 ##let's first do a PCA plotted with positive lns
 tumAbund <- pcaFromDf(fullProts,'inferredTumAbund')%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
 
 ##all proteins
 ggplot(tumAbund)+
-  geom_point(aes(x=PC1,y=PC2,col=ln_examined,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
   ggtitle('All proteins tumor expression')
+
+
+normAbund <- pcaFromDf(normProts,'inferredNormAbund')%>%
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
+##now let's plot ll proteins normal expression
+ggplot(normAbund)+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
+  ggtitle('All proteins normal expression')
 
 ##let's first do a PCA plotted with positive lns
 tumNorm <- pcaFromDf(fullProts,'tumNormDiff')%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
 
 ##all proteins
 ggplot(tumNorm)+
-  geom_point(aes(x=PC1,y=PC2,col=ln_examined,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=ln_examined))+
   ggtitle('Tumor vs. normal all proteins')
 
 ```
 
 
 ## Selected invasion proteins
-Do we see any difference  in clustering/staining with invasivity?
+We have a set of proteins that are known to be related to invasivity - do they cluster the samples any better? 
+
+Do we see any difference  in clustering/staining with invasivity
 
 ```{r pcaplot2, echo=FALSE}
 
@@ -75,20 +90,34 @@ redProts <- fullProts%>%
 
 ##let's first do a PCA plotted with positive lns
 tumAbund <- pcaFromDf(redProts,'inferredTumAbund')%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.dat,by='patient')%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')
 
 ##all proteins
 ggplot(tumAbund)+
-  geom_point(aes(x=PC1,y=PC2,col=ln_examined,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
   ggtitle('Invasive proteins tumor expression')
+
+normAbund <-pcaFromDf(redProts,'inferredNormAbund')%>%
+    left_join(clin.dat,by='patient')%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
+ggplot(normAbund)+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
+  ggtitle('Invasive proteins normal expression')
+
 
 ##let's first do a PCA plotted with positive lns
 tumNorm <- pcaFromDf(redProts,'tumNormDiff')%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
 
 ##all proteins
 ggplot(tumNorm)+
-  geom_point(aes(x=PC1,y=PC2,col=ln_examined,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
   ggtitle('Tumor vs. normal invasive proteins')
 
 ```
+
+
+## Conclusion
+There is no clear separation between samples based on all proteins or invasive proteins.

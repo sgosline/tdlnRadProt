@@ -1,5 +1,5 @@
 ---
-title: "Differentialy expression by LN group"
+title: "Differentialy expression in Normal Tissue by LN group"
 author: "Sara Gosline"
 date: "7/12/2021"
 output: html_document
@@ -23,11 +23,7 @@ Let's first start by seeing how many patients have positive lymph nodes:
        
 It seems that there is a large number that have 0 positive lymph nodes, a group that has just 1, and a group that has 2 or more.
 ```{r plots of groups}
-       
-red.dat<-clin.dat%>%
-         select(patient,staging,positive_by_he)
-       
-red.dat$lnCounts<-sapply(red.dat$positive_by_he,function(x) ifelse(x==0,'zeroLN',ifelse(x>2,'moreThanTwo','oneOrTwo')))
+
        
        
 ggplot(red.dat,aes(x=lnCounts,fill=staging))+geom_bar(position='dodge')
@@ -42,8 +38,8 @@ Now we can compute proteins that are differentially expressed between LN classes
 library(limma)
 
 #create data matrix of samples and collect patients
-protMat<-tumProts%>%
-        pivot_wider(values_from='inferredTumAbund',names_from='patient')%>%
+protMat<-normProts%>%
+        pivot_wider(values_from='inferredNormAbund',names_from='patient')%>%
         tibble::column_to_rownames('Gene')
 
 zpats=red.dat%>%subset(lnCounts=='zeroLN')%>%
@@ -100,7 +96,7 @@ Now let's look at pathways that go from 1/2 LN to more than 1/2
 ```{r biological pathways more,warning=FALSE}
 
 m.en <-leapR(geneset=ncipid,enrichment_method='enrichment_in_order',datamatrix=moreVsOne,primary_columns='logFC')%>%
-        subset(BH_pvalue<0.05)
+        subset(BH_pvalue<0.25)
 
 print(m.en)
 
@@ -119,13 +115,13 @@ redProts <- fullProts%>%
   subset(Gene%in%c(zprots$featureID,mprots$featureID))
 
 ##let's first do a PCA plotted with positive lns
-tumAbund <- pcaFromDf(redProts,'inferredTumAbund')%>%
+tumAbund <- pcaFromDf(redProts,'inferredNormAbund')%>%
   left_join(clin.dat,by='patient')
 
 ##all proteins
 tumAbund%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')%>%
 ggplot()+
   geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=positive_by_he))+
-  ggtitle('Selected proteins by tumor expression')
+  ggtitle('Selected proteins by normal expression')
 
 ```
