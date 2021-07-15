@@ -1,0 +1,110 @@
+---
+title: "Differentialy altered imaging features by LN group"
+author: "Sara Gosline"
+date: "7/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('loadHNSCCdata.R')
+```
+
+## Evaluate clustering of samples by imaging features
+
+How do the tumor samples cluster by imaging features alone?
+
+```{r cluster by image, warning=FALSE}
+##let's first do a PCA plotted with positive lns
+imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
+  ggtitle('All proteins tumor expression')
+
+
+```
+
+## Group samples and get differential expression
+
+Now we can compute proteins that are differentially expressed between LN classes.
+
+```{r differential expression}
+library(limma)
+
+#create data matrix of samples and collect patients
+imgMat<-imgFeat%>%
+  select(-Feature_Class)%>%
+        pivot_wider(values_from='value',names_from='patient',values_fn=(value=mean))%>%
+        tibble::column_to_rownames('Feature_Type')
+
+zpats=red.dat%>%subset(lnCounts=='zeroLN')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(imgMat))
+
+opats=red.dat%>%subset(lnCounts=='oneOrTwo')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(imgMat))
+
+mpats=red.dat%>%subset(lnCounts=='moreThanTwo')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(imgMat))
+
+doLim<-function(dat,sampleIDs.group1,sampleIDs.group2){
+  fac <- factor(rep(c(2,1), c(length(sampleIDs.group2), length(sampleIDs.group1))))
+  design <- model.matrix(~fac)
+  fit <- lmFit(dat[,c(sampleIDs.group2, sampleIDs.group1)], design)
+  fit <- eBayes(fit)
+  print(topTable(fit, coef=2))
+  res <- topTable(fit, coef=2, number=Inf, sort.by="none")
+  res <- data.frame(featureID=rownames(res), res, stringsAsFactors = F)
+  return(res)
+}
+
+oneVsZero=doLim(imgMat,opats$patient,zpats$patient)
+moreVsOne=doLim(imgMat,mpats$patient,opats$patient)
+moreVsZero=doLim(imgMat,mpats$patient,zpats$patient)
+
+allVsZero=doLim(imgMat,c(opats$patient,mpats$patient),zpats$patient)
+##now 
+```
+
+So we have some proteins!! Only 1 is differentially expressed. Let's try some GSEA analysis instead to see if we can find biological processes enriched.
+
+
+
+
+## Plot changing proteins
+
+Now let's see if we can plot the patient samples by the proteins involved
+
+
+```{r, plot samples,warning=FALSE}
+zprots=subset(oneVsZero,P.Value<0.05)%>%select(featureID)
+mprots=subset(moreVsOne,P.Value<0.05)%>%select(featureID)
+
+redProts <- imgFeat%>%
+  subset(Feature_Type%in%c(zprots$featureID,mprots$featureID))
+
+##let's first do a PCA plotted with positive lns
+tumAbund <- pcaFromDf(rename(redProts,Gene='Feature_Type'),'value')%>%
+  left_join(clin.dat,by='patient')
+
+##all proteins
+tumAbund%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')%>%
+ggplot()+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=positive_by_he))+
+  ggtitle('Patients by selected imaging features')
+
+```
+
+Since there are so few features we can plot each one. 
+
+```{r plot img features}
+
+ggplot(left_join(redProts,red.dat),aes(fill=lnCounts,y=log10(value),x=Feature_Type))+geom_boxplot()+guides(x=guide_axis(angle=45))
+
+```

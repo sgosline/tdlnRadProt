@@ -62,9 +62,11 @@ fullProts <- normProts%>%inner_join(tumProts,by=c('Gene','patient'))%>%
 ##helper functions
 ##quick function to do PCA on a column value
 pcaFromDf<-function(df,column){
+  fn=c(mean)
+  names(fn)<-column
   mat <-df%>%
     dplyr::select('Gene','patient',column)%>%
-    pivot_wider(names_from='patient',values_from=column)%>%
+    pivot_wider(names_from='patient',values_from=column,values_fn=fn)%>%
     tibble::column_to_rownames('Gene')%>%
     as.matrix()
   return(data.frame(prcomp(t(mat))$x)%>%tibble::rownames_to_column('patient'))
