@@ -23,7 +23,45 @@ imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
 ##all proteins
 ggplot(imgVals)+
   geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
-  ggtitle('All proteins tumor expression')
+  ggtitle('All tumors by image features')
+
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC2,y=PC3,size=ln_examined,col=lnCounts))+
+  ggtitle('All tumors by image features (PC2 and 3)')
+
+
+```
+
+Those two outliers are not great - might throw things off a bit, so let's remove them.
+
+```{r remove outliers}
+
+
+outliers <- imgVals%>%subset(PC1<(-10e9)|PC2<(-2e9))%>%
+  select(patient)
+
+
+imgFeat <- imgFeat%>%
+  subset(patient!=outliers$patient)
+
+imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
+  ggtitle('All tumors by image features')
+
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC2,y=PC3,size=ln_examined,col=lnCounts))+
+  ggtitle('All tumors by image features (PC2 and 3)')
+
+
 
 
 ```
@@ -66,9 +104,9 @@ doLim<-function(dat,sampleIDs.group1,sampleIDs.group2){
 
 oneVsZero=doLim(imgMat,opats$patient,zpats$patient)
 moreVsOne=doLim(imgMat,mpats$patient,opats$patient)
-moreVsZero=doLim(imgMat,mpats$patient,zpats$patient)
+#moreVsZero=doLim(imgMat,mpats$patient,zpats$patient)
 
-allVsZero=doLim(imgMat,c(opats$patient,mpats$patient),zpats$patient)
+#allVsZero=doLim(imgMat,c(opats$patient,mpats$patient),zpats$patient)
 ##now 
 ```
 
@@ -97,6 +135,11 @@ tumAbund <- pcaFromDf(rename(redProts,Gene='Feature_Type'),'value')%>%
 tumAbund%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')%>%
 ggplot()+
   geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=positive_by_he))+
+  ggtitle('Patients by selected imaging features')
+
+tumAbund%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')%>%
+ggplot()+
+  geom_point(aes(x=PC2,y=PC3,col=lnCounts,size=positive_by_he))+
   ggtitle('Patients by selected imaging features')
 
 ```

@@ -51,6 +51,7 @@ red.dat<-clin.dat%>%
   select(patient,staging,positive_by_he)
 
 red.dat$lnCounts<-sapply(red.dat$positive_by_he,function(x) ifelse(x==0,'zeroLN',ifelse(x>2,'moreThanTwo','oneOrTwo')))
+red.dat$lnSpread<-sapply(red.dat$positive_by_he,function(x) ifelse(x==0,'zeroLN','LNaffected'))
 
 
 ##now combine the abundances to the same table
