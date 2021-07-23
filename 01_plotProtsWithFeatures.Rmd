@@ -9,7 +9,8 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(ggplot2)
 library(grid)
-library(dplyr)
+source("loadHNSCCdata.R")
+
 #library(gridExtra)
 ```
 
@@ -17,13 +18,12 @@ library(dplyr)
 We are searching for proteins that can predict lymph node status to use to build our model. We will start with a supervised approach that selects proteins known to be involved in invasiveness from Poliquent et al. First we just load the proteomics data that we have. 
 
 ```{r load data, echo=FALSE,warning=FALSE}
-source("loadHNSCCdata.R")
 
 res=data.frame(`Stats`=c('total proteins','proteins in list','total samples','total with normal and tumor'),
            `Number`=c(length(unique(impProts$Gene)),length(intersect(invList$Symbol,fullProts$Gene)),
                        ncol(impProts)-1,length(unique(fullProts$patient))))
 
-print(res)
+DT::datatable(res)
 ```
 Now that we have the genes and the samples aligned we can begin to analyze them more broadly.
 

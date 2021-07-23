@@ -1,0 +1,215 @@
+---
+title: "Differentialy expression by LN group"
+author: "Sara Gosline"
+date: "7/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('loadHNSCCdata.R')
+```
+
+
+## Dive into lymph node status to investigate possible data separation
+
+To build a model we want to break down patient samples into various classes based on their lymph node status. 
+
+Let's first start by seeing how many patients have positive lymph nodes:
+
+```{r plot of LN counts, warn=FALSE}
+       ggplot(clin.dat,aes(x=ln_examined,y=positive_by_he,col=staging))+geom_point()+
+  scale_color_manual(values=pal)
+```
+       
+It seems that there is a large number that have 0 positive lymph nodes, a group that has just 1, and a group that has 2 or more.
+```{r plots of groups}
+
+ggplot(red.dat,aes(x=lnSpread,fill=staging))+geom_bar(position='dodge')+scale_fill_manual(values=pal)
+    
+```
+
+## Group samples and get differential expression
+
+Now we can compute proteins that are differentially expressed between LN classes.
+
+```{r differential expression}
+library(limma)
+
+#create data matrix of samples and collect patients
+protMat<-tumProts%>%
+        pivot_wider(values_from='inferredTumAbund',names_from='patient')%>%
+        tibble::column_to_rownames('Gene')
+
+zpats=red.dat%>%subset(lnSpread=='zeroLN')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+opats=red.dat%>%subset(lnSpread=='LNaffected')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+
+doLim<-function(dat,sampleIDs.group1,sampleIDs.group2){
+  fac <- factor(rep(c(2,1), c(length(sampleIDs.group2), length(sampleIDs.group1))))
+  design <- model.matrix(~fac)
+  fit <- lmFit(dat[,c(sampleIDs.group2, sampleIDs.group1)], design)
+  fit <- eBayes(fit)
+  res <- topTable(fit, coef=2, number=Inf, sort.by="none")
+  res <- data.frame(featureID=rownames(res), res, stringsAsFactors = F)
+  return(res)
+}
+
+oneVsZero=doLim(protMat,opats$patient,zpats$patient)
+oneVsZero%>%subset(P.Value<0.001)%>%
+  rename(Gene='featureID')%>%left_join(tumProts)%>%
+  left_join(red.dat)%>%
+  ggplot(aes(x=Gene,y=inferredTumAbund))+geom_boxplot(aes(fill=lnSpread))+scale_x_discrete(guide = guide_axis(angle = 90))+ggtitle('Proteins somewhat differentially expressed at p<0.001')+scale_fill_manual(values=pal)
+##now 
+```
+
+So we have some proteins!! Only 1 is differentially expressed. Let's try some GSEA analysis instead to see if we can find biological processes enriched.
+
+## Biological pathway enrichment
+
+Let's compute the pathways (NCI Pathways) enriched upon proteins that are different between zero and 1/2 LN affected
+
+```{r biological pathways,warning=FALSE}
+library(leapr)
+
+data("ncipid")
+data('krbpaths')
+z.en <- leapR(geneset=ncipid,enrichment_method='enrichment_in_order',datamatrix=oneVsZero,primary_columns='logFC')%>%
+        subset(BH_pvalue<0.01)
+
+DT::datatable(select(z.en,-protsingroup))
+
+```
+
+## Plot changing proteins
+
+Now let's see if we can plot the patient samples by the proteins involved
+
+
+```{r, plot samples,warning=FALSE}
+zprots=subset(oneVsZero,P.Value<0.01)%>%select(featureID)
+
+redProts <- fullProts%>%
+  subset(Gene%in%zprots$featureID)
+
+##let's first do a PCA plotted with positive lns
+tumAbund <- pcaFromDf(redProts,'inferredTumAbund')%>%
+  left_join(clin.dat,by='patient')
+
+##all proteins
+tumAbund%>%
+  left_join(select(red.dat,c(patient,lnSpread)),by='patient')%>%
+ggplot()+
+  geom_point(aes(x=PC1,y=PC2,col=lnSpread,size=positive_by_he))+
+  ggtitle('Selected proteins by tumor expression')+scale_color_manual(values=pal)
+
+```
+
+## Evaluate imaging data
+
+first remove outliers
+
+```{r remove outliers}
+
+imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnSpread)),by='patient')
+
+
+outliers <- imgVals%>%subset(PC1<(-10e9)|PC2<(-2e9))%>%
+  select(patient)
+
+
+imgFeat <- imgFeat%>%
+  subset(patient!=outliers$patient)
+
+imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnSpread)),by='patient')
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnSpread))+
+  ggtitle('All tumors by image features without outliers')+scale_color_manual(values=pal)
+
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC2,y=PC3,size=ln_examined,col=lnSpread))+
+  ggtitle('All tumors by image features (PC2 and 3) without outliers')+scale_color_manual(values=pal)
+
+
+
+
+```
+
+## Select image features correlated wtih LN Spread
+Here we use LIMMA to evaluate image features. None are significant but at least we can work with them.
+
+```{r image differential expression}
+library(limma)
+
+#create data matrix of samples and collect patients
+imgMat<-imgFeat%>%
+  select(-Feature_Class)%>%
+        pivot_wider(values_from='value',names_from='patient',values_fn=(value=mean))%>%
+        tibble::column_to_rownames('Feature_Type')
+
+zpats=red.dat%>%subset(lnSpread=='zeroLN')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(imgMat))
+
+opats=red.dat%>%subset(lnSpread=='LNaffected')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(imgMat))
+
+
+doLim<-function(dat,sampleIDs.group1,sampleIDs.group2){
+  fac <- factor(rep(c(2,1), c(length(sampleIDs.group2), length(sampleIDs.group1))))
+  design <- model.matrix(~fac)
+  fit <- lmFit(dat[,c(sampleIDs.group2, sampleIDs.group1)], design)
+  fit <- eBayes(fit)
+  res <- topTable(fit, coef=2, number=Inf, sort.by="none")
+  res <- data.frame(featureID=rownames(res), res, stringsAsFactors = F)
+  return(res)
+}
+
+oneVsZero=doLim(imgMat,opats$patient,zpats$patient)
+sigFeatures<-oneVsZero%>%arrange(P.Value)%>%subset(P.Value<0.05)
+
+oneVsZero%>%subset(featureID%in%sigFeatures$featureID)%>%
+  rename(Feature_Type='featureID')%>%left_join(imgFeat)%>%
+  left_join(red.dat)%>%
+  ggplot(aes(x=Feature_Type,y=value))+geom_boxplot(aes(fill=lnSpread))+scale_x_discrete(guide = guide_axis(angle = 90))+scale_y_log10()+ggtitle('Image features somewhat differentially expressed at p<0.05')+scale_fill_manual(values=pal)
+
+##now 
+```
+These are the features of interest now - the ones that are significantly associated with LN status (before correction).
+
+```{r, plot image feature samples,warning=FALSE}
+zprots=subset(oneVsZero,P.Value<0.05)%>%select(featureID)
+
+redProts <- imgFeat%>%
+  subset(Feature_Type%in%c(zprots$featureID))
+
+##let's first do a PCA plotted with positive lns
+tumAbund <- pcaFromDf(rename(redProts,Gene='Feature_Type'),'value')%>%
+  left_join(clin.dat,by='patient')
+
+##all proteins
+tumAbund%>%
+  left_join(select(red.dat,c(patient,lnSpread)),by='patient')%>%ggplot()+
+  geom_point(aes(x=PC1,y=PC2,col=lnSpread,size=positive_by_he))+
+  ggtitle('Patients by selected imaging features')+scale_color_manual(values=pal)
+
+tumAbund%>%left_join(select(red.dat,c(patient,lnSpread)),by='patient')%>%
+ggplot()+
+  geom_point(aes(x=PC2,y=PC3,col=lnSpread,size=positive_by_he))+
+  ggtitle('Patients by selected imaging features')+scale_color_manual(values=pal)
+
+```

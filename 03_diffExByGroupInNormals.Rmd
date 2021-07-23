@@ -1,0 +1,136 @@
+---
+title: "Differentialy expression in Normal Tissue by LN group"
+author: "Sara Gosline"
+date: "7/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('loadHNSCCdata.R')
+library(dplyr)
+```
+
+
+## Dive into lymph node status to investigate possible data separation
+
+To build a model we want to break down patient samples into various classes based on their lymph node status. 
+
+Let's first start by seeing how many patients have positive lymph nodes:
+
+```{r plot of LN counts, warn=FALSE}
+       ggplot(clin.dat,aes(x=ln_examined,y=positive_by_he,col=staging))+geom_point()+scale_color_manual(values=pal)
+```
+       
+It seems that there is a large number that have 0 positive lymph nodes, a group that has just 1, and a group that has 2 or more.
+```{r plots of groups}
+
+       
+       
+ggplot(red.dat,aes(x=lnCounts,fill=staging))+geom_bar(position='dodge')+scale_fill_manual(values=pal)
+```
+    
+```
+
+## Group samples and get differential expression
+
+Now we can compute proteins that are differentially expressed between LN classes.
+
+```{r differential expression}
+library(limma)
+
+#create data matrix of samples and collect patients
+protMat<-normProts%>%
+        pivot_wider(values_from='inferredNormAbund',names_from='patient')%>%
+        tibble::column_to_rownames('Gene')
+
+zpats=red.dat%>%subset(lnCounts=='zeroLN')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+opats=red.dat%>%subset(lnCounts=='oneOrTwo')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+mpats=red.dat%>%subset(lnCounts=='moreThanTwo')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+doLim<-function(dat,sampleIDs.group1,sampleIDs.group2){
+  fac <- factor(rep(c(2,1), c(length(sampleIDs.group2), length(sampleIDs.group1))))
+  design <- model.matrix(~fac)
+  fit <- lmFit(dat[,c(sampleIDs.group2, sampleIDs.group1)], design)
+  fit <- eBayes(fit)
+  res <- topTable(fit, coef=2, number=Inf, sort.by="none")
+  res <- data.frame(featureID=rownames(res), res, stringsAsFactors = F)
+  return(res)
+}
+
+oneVsZero=doLim(protMat,opats$patient,zpats$patient)
+moreVsOne=doLim(protMat,mpats$patient,opats$patient)
+moreVsZero=doLim(protMat,mpats$patient,zpats$patient)
+
+allVsZero=doLim(protMat,c(opats$patient,mpats$patient),zpats$patient)
+
+pthresh=0.01
+combinedDF<-rbind(data.frame(condition='oneVsZero',subset(oneVsZero,P.Value<pthresh)),
+                  data.frame(condition='moreVsOne',subset(moreVsOne,P.Value<pthresh)),
+                  data.frame(condition='moreVsZero',subset(moreVsZero,P.Value<pthresh)))
+##now 
+
+DT::datatable(combinedDF)
+##now 
+```
+
+So we have some proteins!! Only 1 is differentially expressed. Let's try some GSEA analysis instead to see if we can find biological processes enriched.
+
+## Biological pathway enrichment
+
+Let's compute the pathways (NCI Pathways) enriched upon proteins that are different between zero and 1/2 LN affected
+
+```{r biological pathways,warning=FALSE}
+library(leapr)
+
+data("ncipid")
+data('krbpaths')
+z.en <- leapR(geneset=ncipid,enrichment_method='enrichment_in_order',datamatrix=oneVsZero,primary_columns='logFC')%>%
+        subset(BH_pvalue<0.05)
+
+DT::datatable(select(z.en,-ingroupnames))
+
+```
+
+Now let's look at pathways that go from 1/2 LN to more than 1/2
+
+```{r biological pathways more,warning=FALSE}
+
+m.en <-leapR(geneset=ncipid,enrichment_method='enrichment_in_order',datamatrix=moreVsOne,primary_columns='logFC')%>%
+        subset(BH_pvalue<0.25)
+
+DT::datatable(select(m.en,-ingroupnames))
+
+```
+
+## Plot changing proteins
+
+Now let's see if we can plot the patient samples by the proteins involved
+
+
+```{r, plot samples,warning=FALSE}
+zprots=subset(oneVsZero,P.Value<pthresh)%>%select(featureID)
+mprots=subset(moreVsOne,P.Value<pthresh)%>%select(featureID)
+
+redProts <- fullProts%>%
+  subset(Gene%in%c(zprots$featureID,mprots$featureID))
+
+##let's first do a PCA plotted with positive lns
+tumAbund <- pcaFromDf(redProts,'inferredNormAbund')%>%
+  left_join(clin.dat,by='patient')
+
+##all proteins
+tumAbund%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')%>%
+ggplot()+
+  geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=positive_by_he))+
+  ggtitle(paste0('Selected proteins by normal expression, P<',pthresh))+scale_color_manual(values=rev(pal))
+
+```

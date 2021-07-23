@@ -23,23 +23,20 @@ imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
 ##all proteins
 ggplot(imgVals)+
   geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
-<<<<<<< Updated upstream
-  ggtitle('All proteins tumor expression')
-=======
   ggtitle('All tumors by image features')+scale_color_manual(values=pal)
 
 
 ##all proteins
 ggplot(imgVals)+
   geom_point(aes(x=PC2,y=PC3,size=ln_examined,col=lnCounts))+
-  ggtitle('All tumors by image features (PC2 and 3)')+scale_colors_manual(values=pal)
+  ggtitle('All tumors by image features (PC2 and 3)')+scale_color_manual(values=pal)
 
 
 ```
 
 Those two outliers are not great - might throw things off a bit, so let's remove them.
 
-```{r remove outliers}
+```{r remove outliers,warning=FALSE}
 
 
 outliers <- imgVals%>%subset(PC1<(-10e9)|PC2<(-2e9))%>%
@@ -56,16 +53,13 @@ imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
 ##all proteins
 ggplot(imgVals)+
   geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
-  ggtitle('All tumors by image features')
+  ggtitle('All tumors by image features - outliers removed')+scale_color_manual(values=pal)
 
 
 ##all proteins
 ggplot(imgVals)+
   geom_point(aes(x=PC2,y=PC3,size=ln_examined,col=lnCounts))+
-  ggtitle('All tumors by image features (PC2 and 3)')
-
-
->>>>>>> Stashed changes
+  ggtitle('All tumors by image features (PC2 and 3) outliers removed')+scale_color_manual(values=pal)
 
 
 ```
@@ -100,7 +94,6 @@ doLim<-function(dat,sampleIDs.group1,sampleIDs.group2){
   design <- model.matrix(~fac)
   fit <- lmFit(dat[,c(sampleIDs.group2, sampleIDs.group1)], design)
   fit <- eBayes(fit)
-  print(topTable(fit, coef=2))
   res <- topTable(fit, coef=2, number=Inf, sort.by="none")
   res <- data.frame(featureID=rownames(res), res, stringsAsFactors = F)
   return(res)
@@ -111,7 +104,11 @@ moreVsOne=doLim(imgMat,mpats$patient,opats$patient)
 moreVsZero=doLim(imgMat,mpats$patient,zpats$patient)
 
 allVsZero=doLim(imgMat,c(opats$patient,mpats$patient),zpats$patient)
-##now 
+##now
+pthresh=0.05
+combinedDF<-rbind(data.frame(condition='oneVsZero',subset(oneVsZero,P.Value<pthresh)),
+                  data.frame(condition='moreVsOne',subset(moreVsOne,P.Value<pthresh)),
+                  data.frame(condition='moreVsZero',subset(moreVsZero,P.Value<pthresh)))
 ```
 
 So we have some proteins!! Only 1 is differentially expressed. Let's try some GSEA analysis instead to see if we can find biological processes enriched.
@@ -139,7 +136,7 @@ tumAbund <- pcaFromDf(rename(redProts,Gene='Feature_Type'),'value')%>%
 tumAbund%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')%>%
 ggplot()+
   geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=positive_by_he))+
-  ggtitle('Patients by selected imaging features')
+  ggtitle('Patients by selected imaging features')+scale_color_manual(values=pal)
 
 ```
 
@@ -147,6 +144,6 @@ Since there are so few features we can plot each one.
 
 ```{r plot img features}
 
-ggplot(left_join(redProts,red.dat),aes(fill=lnCounts,y=log10(value),x=Feature_Type))+geom_boxplot()+guides(x=guide_axis(angle=45))
+ggplot(left_join(redProts,red.dat),aes(fill=lnCounts,y=log10(value),x=Feature_Type))+geom_boxplot()+guides(x=guide_axis(angle=45))+scale_fill_manual(values=pal)
 
 ```
