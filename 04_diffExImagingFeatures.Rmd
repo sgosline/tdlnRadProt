@@ -23,7 +23,49 @@ imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
 ##all proteins
 ggplot(imgVals)+
   geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
+<<<<<<< Updated upstream
   ggtitle('All proteins tumor expression')
+=======
+  ggtitle('All tumors by image features')+scale_color_manual(values=pal)
+
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC2,y=PC3,size=ln_examined,col=lnCounts))+
+  ggtitle('All tumors by image features (PC2 and 3)')+scale_colors_manual(values=pal)
+
+
+```
+
+Those two outliers are not great - might throw things off a bit, so let's remove them.
+
+```{r remove outliers}
+
+
+outliers <- imgVals%>%subset(PC1<(-10e9)|PC2<(-2e9))%>%
+  select(patient)
+
+
+imgFeat <- imgFeat%>%
+  subset(patient!=outliers$patient)
+
+imgVals <- pcaFromDf(rename(imgFeat,Gene='Feature_Type'),'value')%>%
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
+  ggtitle('All tumors by image features')
+
+
+##all proteins
+ggplot(imgVals)+
+  geom_point(aes(x=PC2,y=PC3,size=ln_examined,col=lnCounts))+
+  ggtitle('All tumors by image features (PC2 and 3)')
+
+
+>>>>>>> Stashed changes
 
 
 ```

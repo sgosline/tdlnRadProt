@@ -2,6 +2,14 @@ library(readxl)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+
+if(!require(nationalparkcolors)){
+  devtools::install_github("katiejolly/nationalparkcolors")
+  library(nationalparkcolors)
+}
+
+pal<-c(park_palette('DeathValley'),park_palette("GrandTeton"))
+
 ##read in imaging features 
 imgFeat <-readxl::read_xlsx('data/cptac_hnc_pyrad_features_v2.xlsx')
 ##convert to long format

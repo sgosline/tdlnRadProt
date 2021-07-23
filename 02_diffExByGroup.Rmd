@@ -18,15 +18,16 @@ To build a model we want to break down patient samples into various classes base
 Let's first start by seeing how many patients have positive lymph nodes:
 
 ```{r plot of LN counts, warn=FALSE}
-       ggplot(clin.dat,aes(x=ln_examined,y=positive_by_he,col=staging))+geom_point()
+       ggplot(clin.dat,aes(x=ln_examined,y=positive_by_he,col=staging))+geom_point()+
+  scale_color_manual(values=pal)
 ```
        
-It seems that there is a large number that have 0 positive lymph nodes, a group that has just 1, and a group that has 2 or more.
+It seems that there is a large number that have 0 positive lymph nodes, a group that has just 1, and a group that has 2 or more. We can start by classifying lymph nodes into three states. 
 ```{r plots of groups}
 
        
        
-ggplot(red.dat,aes(x=lnCounts,fill=staging))+geom_bar(position='dodge')
+ggplot(red.dat,aes(x=lnCounts,fill=staging))+geom_bar(position='dodge')+scale_fill_manual(values=pal)
     
 ```
 
@@ -59,7 +60,7 @@ doLim<-function(dat,sampleIDs.group1,sampleIDs.group2){
   design <- model.matrix(~fac)
   fit <- lmFit(dat[,c(sampleIDs.group2, sampleIDs.group1)], design)
   fit <- eBayes(fit)
-  print(topTable(fit, coef=2))
+ # print(topTable(fit, coef=2))
   res <- topTable(fit, coef=2, number=Inf, sort.by="none")
   res <- data.frame(featureID=rownames(res), res, stringsAsFactors = F)
   return(res)
@@ -70,7 +71,14 @@ moreVsOne=doLim(protMat,mpats$patient,opats$patient)
 moreVsZero=doLim(protMat,mpats$patient,zpats$patient)
 
 allVsZero=doLim(protMat,c(opats$patient,mpats$patient),zpats$patient)
+
+pthresh=0.01
+combinedDF<-rbind(data.frame(condition='oneVsZero',subset(oneVsZero,P.Value<pthresh)),
+                  data.frame(condition='moreVsOne',subset(moreVsOne,P.Value<pthresh)),
+                  data.frame(condition='moreVsZero',subset(moreVsZero,P.Value<pthresh)))
 ##now 
+
+DT::datatable(combinedDF)
 ```
 
 So we have some proteins!! Only 1 is differentially expressed. Let's try some GSEA analysis instead to see if we can find biological processes enriched.
@@ -84,22 +92,22 @@ library(leapr)
 
 data("ncipid")
 data('krbpaths')
-z.en <- leapR(geneset=ncipid,enrichment_method='enrichment_in_order',datamatrix=oneVsZero,primary_columns='logFC')%>%
+z.en <- leapR(geneset=ncipid,enrichment_method='enrichment_in_order',
+              datamatrix=oneVsZero,primary_columns='logFC')%>%
         subset(BH_pvalue<0.05)
 
-print(z.en)
-
+DT::datatable(select(z.en,-ingroupnames))
 ```
 
 Now let's look at pathways that go from 1/2 LN to more than 1/2
 
 ```{r biological pathways more,warning=FALSE}
 
-m.en <-leapR(geneset=ncipid,enrichment_method='enrichment_in_order',datamatrix=moreVsOne,primary_columns='logFC')%>%
+m.en <-leapR(geneset=ncipid,enrichment_method='enrichment_in_order',
+             datamatrix=moreVsOne,primary_columns='logFC')%>%
         subset(BH_pvalue<0.05)
 
-print(m.en)
-
+DT::datatable(select(m.en,-ingroupnames))
 ```
 
 ## Plot changing proteins
@@ -108,8 +116,8 @@ Now let's see if we can plot the patient samples by the proteins involved
 
 
 ```{r, plot samples,warning=FALSE}
-zprots=subset(oneVsZero,P.Value<0.01)%>%select(featureID)
-mprots=subset(moreVsOne,P.Value<0.01)%>%select(featureID)
+zprots=subset(oneVsZero,P.Value<pthresh)%>%select(featureID)
+mprots=subset(moreVsOne,P.Value<pthresh)%>%select(featureID)
 
 redProts <- fullProts%>%
   subset(Gene%in%c(zprots$featureID,mprots$featureID))
@@ -122,6 +130,6 @@ tumAbund <- pcaFromDf(redProts,'inferredTumAbund')%>%
 tumAbund%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')%>%
 ggplot()+
   geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=positive_by_he))+
-  ggtitle('Selected proteins by tumor expression')
+  ggtitle(paste0('Selected proteins by tumor expression P<',pthresh))+scale_color_manual(values=rev(pal))
 
 ```
