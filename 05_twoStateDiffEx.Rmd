@@ -45,7 +45,7 @@ zpats=red.dat%>%subset(lnSpread=='zeroLN')%>%
         select(patient)%>%
         subset(patient%in%colnames(protMat))
 
-opats=red.dat%>%subset(lnSpread=='LNaffected')%>%
+opats=red.dat%>%subset(lnSpread=='lnAffected')%>%
         select(patient)%>%
         subset(patient%in%colnames(protMat))
 
@@ -82,7 +82,7 @@ data('krbpaths')
 z.en <- leapR(geneset=ncipid,enrichment_method='enrichment_in_order',datamatrix=oneVsZero,primary_columns='logFC')%>%
         subset(BH_pvalue<0.01)
 
-DT::datatable(select(z.en,-protsingroup))
+DT::datatable(select(z.en,-ingroupnames))
 
 ```
 
@@ -164,7 +164,7 @@ zpats=red.dat%>%subset(lnSpread=='zeroLN')%>%
         select(patient)%>%
         subset(patient%in%colnames(imgMat))
 
-opats=red.dat%>%subset(lnSpread=='LNaffected')%>%
+opats=red.dat%>%subset(lnSpread=='lnAffected')%>%
         select(patient)%>%
         subset(patient%in%colnames(imgMat))
 

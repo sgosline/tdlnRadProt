@@ -23,7 +23,13 @@ res=data.frame(`Stats`=c('total proteins','proteins in list','total samples','to
            `Number`=c(length(unique(impProts$Gene)),length(intersect(invList$Symbol,fullProts$Gene)),
                        ncol(impProts)-1,length(unique(fullProts$patient))))
 
-DT::datatable(res)
+pats=data.frame(`Stats`=c('Patients with tumor data','Patients with normal data','Patients with imaging data'),
+                Counts=c(length(unique(tumProts$patient)),                                              length(unique(normProts$patient)),
+                         length(unique(imgFeat$patient))))
+
+
+
+DT::datatable(pats)
 ```
 Now that we have the genes and the samples aligned we can begin to analyze them more broadly.
 
@@ -154,7 +160,7 @@ ggplot(tumNorm)+
 
 ##all proteins
 ggplot(tumNorm)+
-  geom_point(aes(x=PC1,y=PC2,col=lnspread,size=frac_ln))+
+  geom_point(aes(x=PC1,y=PC2,col=lnSpread,size=frac_ln))+
   ggtitle('Tumor vs. normal invasive proteins')+scale_color_manual(values=pal)
 
 ```
