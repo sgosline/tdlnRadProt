@@ -2,6 +2,14 @@ library(readxl)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+
+if(!require(nationalparkcolors)){
+  devtools::install_github("katiejolly/nationalparkcolors")
+  library(nationalparkcolors)
+}
+
+pal<-c(park_palette('DeathValley'),park_palette("GrandTeton"))
+
 ##read in imaging features 
 imgFeat <-readxl::read_xlsx('data/cptac_hnc_pyrad_features_v2.xlsx')
 ##convert to long format
@@ -51,7 +59,7 @@ red.dat<-clin.dat%>%
   select(patient,staging,positive_by_he)
 
 red.dat$lnCounts<-sapply(red.dat$positive_by_he,function(x) ifelse(x==0,'zeroLN',ifelse(x>2,'moreThanTwo','oneOrTwo')))
-
+red.dat$lnSpread<-sapply(red.dat$positive_by_he,function(x) ifelse(x==0,'zeroLN','lnAffected'))
 
 ##now combine the abundances to the same table
 fullProts <- normProts%>%inner_join(tumProts,by=c('Gene','patient'))%>%

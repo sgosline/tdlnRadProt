@@ -1,5 +1,5 @@
 ---
-title: "HNSCC Proteomics Plotting"
+title: "Mapping out invasive-related proteins in HNSCC"
 author: "Sara Gosline"
 date: "6/30/2021"
 output: html_document
@@ -9,27 +9,56 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(ggplot2)
 library(grid)
-library(gridExtra)
+source("loadHNSCCdata.R")
+
+#library(gridExtra)
 ```
 
-## Summary
-The goal of this analysis is to ascertain the expression of key proteins in the HSNCC dataset that could give rise to imaging features.
+## Background
+We are searching for proteins that can predict lymph node status to use to build our model. We will start with a supervised approach that selects proteins known to be involved in invasiveness from Poliquent et al. First we just load the proteomics data that we have. 
 
 ```{r load data, echo=FALSE,warning=FALSE}
-source("loadHNSCCdata.R")
 
 res=data.frame(`Stats`=c('total proteins','proteins in list','total samples','total with normal and tumor'),
            `Number`=c(length(unique(impProts$Gene)),length(intersect(invList$Symbol,fullProts$Gene)),
                        ncol(impProts)-1,length(unique(fullProts$patient))))
 
-print(res)
+pats=data.frame(`Stats`=c('Patients with tumor data','Patients with normal data','Patients with imaging data'),
+                Counts=c(length(unique(tumProts$patient)),                                              length(unique(normProts$patient)),
+                         length(unique(imgFeat$patient))))
+
+
+
+DT::datatable(pats)
 ```
 Now that we have the genes and the samples aligned we can begin to analyze them more broadly.
 
 
+## Plot proteins in heatmap
+
+Let's just show what the proteins look like
+
+```{r heatmap of proteins,warning=FALSE}
+library(pheatmap)
+
+
+protMat<-tumProts%>%
+        pivot_wider(values_from='inferredTumAbund',names_from='patient')%>%
+        tibble::column_to_rownames('Gene')
+
+mostVar <- apply(protMat,1,var)%>%
+  sort(decreasing=TRUE)
+
+ann <- red.dat%>%
+  tibble::remove_rownames()%>%
+  tibble::column_to_rownames('patient')
+pheatmap(protMat[names(mostVar)[1:25],],cellheight=10,cellwidth=10,annotation_col = ann, filename='variableProteins.pdf')
+```
+
 ## Visualize samples by patient clustered by tumor abundance
 
-We now want to see how the patients fall across the various variables. We start by plotting raw tumor abundance, raw normal abundance, then compute differences between tumor/normal.
+We now want to see how the patients fall across the various variables. We can first evaluate how well the proteins separate out patients by lymph node status using a three state model or a two state model.
+
 
 ```{r pcaplot, warning=FALSE}
 
@@ -46,34 +75,60 @@ pcaFromDf<-function(df,column){
 ##let's first do a PCA plotted with positive lns
 tumAbund <- pcaFromDf(fullProts,'inferredTumAbund')%>%
   left_join(clin.dat,by='patient')%>%
-  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+  left_join(select(red.dat,c(patient,lnCounts,lnSpread)),by='patient')
 
 
 ##all proteins
 ggplot(tumAbund)+
   geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
-  ggtitle('All proteins tumor expression')
+  ggtitle('All proteins tumor expression')+scale_color_manual(values=pal)
+
+##all proteins
+ggplot(tumAbund)+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnSpread))+
+  ggtitle('All proteins tumor expression')+scale_color_manual(values=pal)
+```
+
+It's clear that the tumor proteins don't really cluster by LN status when analyzed all in bulk. It's worthwhile to investigate the normal proteins however. So we can plot normal protein expression here. 
+```{r pca normal, warning=FALSE}
 
 
 normAbund <- pcaFromDf(normProts,'inferredNormAbund')%>%
   left_join(clin.dat,by='patient')%>%
-  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+  left_join(select(red.dat,c(patient,lnCounts,lnSpread)),by='patient')
 
 ##now let's plot ll proteins normal expression
 ggplot(normAbund)+
   geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnCounts))+
-  ggtitle('All proteins normal expression')
+  ggtitle('All proteins normal expression')+scale_color_manual(values=pal)
 
+
+##now let's plot ll proteins normal expression
+ggplot(normAbund)+
+  geom_point(aes(x=PC1,y=PC2,size=ln_examined,col=lnSpread))+
+  ggtitle('All proteins normal expression')+scale_color_manual(values=pal)
+
+```
+
+We can see if differences between tumor and normal are indicative as well.
+
+```{r tumVsNormal,warning=FALSE}
 ##let's first do a PCA plotted with positive lns
 tumNorm <- pcaFromDf(fullProts,'tumNormDiff')%>%
   left_join(clin.dat,by='patient')%>%
-  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+  left_join(select(red.dat,c(patient,lnCounts,lnSpread)),by='patient')
 
 
 ##all proteins
 ggplot(tumNorm)+
   geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=ln_examined))+
-  ggtitle('Tumor vs. normal all proteins')
+  ggtitle('Tumor vs. normal all proteins')+scale_color_manual(values=pal)
+
+
+##all proteins
+ggplot(tumNorm)+
+  geom_point(aes(x=PC1,y=PC2,col=lnSpread,size=ln_examined))+
+  ggtitle('Tumor vs. normal all proteins')+scale_color_manual(values=pal)
 
 ```
 
@@ -81,7 +136,7 @@ ggplot(tumNorm)+
 ## Selected invasion proteins
 We have a set of proteins that are known to be related to invasivity - do they cluster the samples any better? 
 
-Do we see any difference  in clustering/staining with invasivity
+Do we see any difference  in clustering/staining with invasivity, doing all the tests as we did above. 
 
 ```{r pcaplot2, echo=FALSE}
 
@@ -90,34 +145,47 @@ redProts <- fullProts%>%
 
 ##let's first do a PCA plotted with positive lns
 tumAbund <- pcaFromDf(redProts,'inferredTumAbund')%>%
-  left_join(clin.dat,by='patient')%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+  left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts,lnSpread)),by='patient')
 
 ##all proteins
 ggplot(tumAbund)+
   geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
-  ggtitle('Invasive proteins tumor expression')
+  ggtitle('Invasive proteins tumor expression')+scale_color_manual(values=pal)
+
+
+##all proteins
+ggplot(tumAbund)+
+  geom_point(aes(x=PC1,y=PC2,col=lnSpread,size=frac_ln))+
+  ggtitle('Invasive proteins tumor expression')+scale_color_manual(values=pal)
 
 normAbund <-pcaFromDf(redProts,'inferredNormAbund')%>%
-    left_join(clin.dat,by='patient')%>%left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+    left_join(clin.dat,by='patient')%>%
+  left_join(select(red.dat,c(patient,lnCounts,lnSpread)),by='patient')
 
 ggplot(normAbund)+
   geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
-  ggtitle('Invasive proteins normal expression')
+  ggtitle('Invasive proteins normal expression')+scale_color_manual(values=pal)
 
 
 ##let's first do a PCA plotted with positive lns
 tumNorm <- pcaFromDf(redProts,'tumNormDiff')%>%
   left_join(clin.dat,by='patient')%>%
-  left_join(select(red.dat,c(patient,lnCounts)),by='patient')
+  left_join(select(red.dat,c(patient,lnCounts,lnSpread)),by='patient')
 
 
 ##all proteins
 ggplot(tumNorm)+
   geom_point(aes(x=PC1,y=PC2,col=lnCounts,size=frac_ln))+
-  ggtitle('Tumor vs. normal invasive proteins')
+  ggtitle('Tumor vs. normal invasive proteins')+scale_color_manual(values=pal)
+
+##all proteins
+ggplot(tumNorm)+
+  geom_point(aes(x=PC1,y=PC2,col=lnSpread,size=frac_ln))+
+  ggtitle('Tumor vs. normal invasive proteins')+scale_color_manual(values=pal)
 
 ```
 
 
 ## Conclusion
-There is no clear separation between samples based on all proteins or invasive proteins.
+There is no clear separation between samples based on all proteins or invasive proteins in this supervised fashion. 
