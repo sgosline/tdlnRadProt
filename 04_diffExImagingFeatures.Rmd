@@ -64,6 +64,30 @@ ggplot(imgVals)+
 
 ```
 
+
+## Visualize imaging features in heatmap
+
+Let's see what the imaging features can cluster without any real guidance
+
+```{r heatmap of imaging, warning=FALSE}
+library(pheatmap)
+imgMat<-imgFeat%>%
+  select(-Feature_Class)%>%
+        pivot_wider(values_from='value',names_from='patient',values_fn=(value=mean))%>%
+        tibble::column_to_rownames('Feature_Type')
+
+mostVar <- apply(log10(imgMat),1,var)%>%
+  sort(decreasing=TRUE)
+
+
+ann <- red.dat%>%
+  tibble::remove_rownames()%>%
+  tibble::column_to_rownames('patient')
+
+pheatmap(log10(imgMat[names(mostVar)[1:25],]), annotation_col = ann, cellwidth = 10,cellheight=10,filename='variableImgFeatures.pdf')
+
+```
+
 ## Group samples and get differential expression
 
 Now we can compute proteins that are differentially expressed between LN classes.

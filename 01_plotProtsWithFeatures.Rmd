@@ -34,6 +34,27 @@ DT::datatable(pats)
 Now that we have the genes and the samples aligned we can begin to analyze them more broadly.
 
 
+## Plot proteins in heatmap
+
+Let's just show what the proteins look like
+
+```{r heatmap of proteins,warning=FALSE}
+library(pheatmap)
+
+
+protMat<-tumProts%>%
+        pivot_wider(values_from='inferredTumAbund',names_from='patient')%>%
+        tibble::column_to_rownames('Gene')
+
+mostVar <- apply(protMat,1,var)%>%
+  sort(decreasing=TRUE)
+
+ann <- red.dat%>%
+  tibble::remove_rownames()%>%
+  tibble::column_to_rownames('patient')
+pheatmap(protMat[names(mostVar)[1:25],],cellheight=10,cellwidth=10,annotation_col = ann, filename='variableProteins.pdf')
+```
+
 ## Visualize samples by patient clustered by tumor abundance
 
 We now want to see how the patients fall across the various variables. We can first evaluate how well the proteins separate out patients by lymph node status using a three state model or a two state model.

@@ -29,7 +29,7 @@ ggplot(red.dat,aes(x=lnSpread,fill=staging))+geom_bar(position='dodge')+scale_fi
     
 ```
 
-## Group samples and get differential expression
+## Differential tumor expression
 
 Now we can compute proteins that are differentially expressed between LN classes.
 
@@ -70,7 +70,7 @@ oneVsZero%>%subset(P.Value<0.001)%>%
 
 So we have some proteins!! Only 1 is differentially expressed. Let's try some GSEA analysis instead to see if we can find biological processes enriched.
 
-## Biological pathway enrichment
+### Biological pathway enrichment
 
 Let's compute the pathways (NCI Pathways) enriched upon proteins that are different between zero and 1/2 LN affected
 
@@ -86,13 +86,80 @@ DT::datatable(select(z.en,-ingroupnames))
 
 ```
 
-## Plot changing proteins
+### Plot changing proteins in tumors
 
 Now let's see if we can plot the patient samples by the proteins involved
 
 
 ```{r, plot samples,warning=FALSE}
 zprots=subset(oneVsZero,P.Value<0.01)%>%select(featureID)
+
+redProts <- fullProts%>%
+  subset(Gene%in%zprots$featureID)
+
+##let's first do a PCA plotted with positive lns
+tumAbund <- pcaFromDf(redProts,'inferredTumAbund')%>%
+  left_join(clin.dat,by='patient')
+
+##all proteins
+tumAbund%>%
+  left_join(select(red.dat,c(patient,lnSpread)),by='patient')%>%
+ggplot()+
+  geom_point(aes(x=PC1,y=PC2,col=lnSpread,size=positive_by_he))+
+  ggtitle('Patients by expression of differentially expressed proteins')+
+  scale_color_manual(values=pal)
+
+```
+
+## Normal protein expression changes
+
+Do the normal proteins also give indication of changes in LN status? 
+
+```{r plot nomrmals, warning=FALSE}
+#create data matrix of samples and collect patients
+protMat<-normProts%>%
+        pivot_wider(values_from='inferredNormAbund',names_from='patient')%>%
+        tibble::column_to_rownames('Gene')
+
+zpats=red.dat%>%subset(lnSpread=='zeroLN')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+opats=red.dat%>%subset(lnSpread=='lnAffected')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+oneVsZero=doLim(protMat,opats$patient,zpats$patient)
+
+oneVsZero%>%subset(P.Value<0.005)%>%
+  rename(Gene='featureID')%>%left_join(normProts)%>%
+  left_join(red.dat)%>%
+  ggplot(aes(x=Gene,y=inferredNormAbund))+geom_boxplot(aes(fill=lnSpread))+scale_x_discrete(guide = guide_axis(angle = 90))+ggtitle('Normal proteins somewhat differentially expressed at p<0.005')+scale_fill_manual(values=pal)
+
+```
+
+### Normal biological processes
+What processes are enriched?
+
+```{r normal biological pathways,warning=FALSE}
+library(leapr)
+
+data("ncipid")
+data('krbpaths')
+z.en <- leapR(geneset=ncipid,enrichment_method='enrichment_in_order',datamatrix=oneVsZero,primary_columns='logFC')%>%
+        subset(BH_pvalue<0.05)
+
+DT::datatable(select(z.en,-ingroupnames))
+
+```
+
+### Plot changing proteins in tumors
+
+Now let's see if we can plot the patient samples by the proteins involved
+
+
+```{r, plot nmormal samples,warning=FALSE}
+zprots=subset(oneVsZero,P.Value<0.005)%>%select(featureID)
 
 redProts <- fullProts%>%
   subset(Gene%in%zprots$featureID)
