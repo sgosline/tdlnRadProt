@@ -1,0 +1,188 @@
+---
+title: "06_LymphNodeStats"
+author: "Sara Gosline"
+date: "12/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(nationalparkcolors)
+```
+
+## Summary of data
+
+We have collected radiomics features for numerous lymph nodes released as part of the CPTAC consortium. While the lymph nodes do not have proteomic data, the images can provide some information.
+
+```{r load data,warning=FALSE, message=FALSE}
+
+##read in data
+require(readxl)
+
+fpath='./data/lnSegs/'
+files = list.files(fpath)
+lnfiles = files[grep('C3.*[0-9].xlsx',files)]
+
+all.samps<-do.call(rbind,lapply(lnfiles,function(lnfi){
+  tab<-readxl::read_xlsx(paste0(fpath,lnfi))
+#  print(lnfi)
+  if(!'Image type'%in%colnames(tab))##check with vivian about this
+    return(NULL)
+  ltab<-tab%>%tidyr::pivot_longer(cols=c(-`Image type`,-`Feature Class`,-`Feature Name`),
+                            names_to='lnSample',values_to='value')%>%
+    tidyr::separate(lnSample,into=c('class','side','level','lnNumber','rest'),sep='_')%>%
+    dplyr::select(-rest)%>%
+    dplyr::mutate(patient=gsub('.xlsx','',lnfi))
+}))
+
+
+##now lets collect clinical data
+clin.dat<-read.table('data/HNSCC_Feb2021_clinical_data.csv',sep=',',header=T,check.names=F,quote='"')%>%
+  dplyr::select(TumorStage="baseline/pathologic_staging_primary_tumor_pt",patient="case_id",TumorSite="baseline/tumor_site",TumorLaterality="baseline/tumor_laterality")%>%distinct()
+ 
+
+##now we hve most of the data
+all.samps<-all.samps%>%
+  mutate(class=gsub("Normal","Norm",class))%>%
+  rowwise()%>%
+    mutate(sampid=paste(patient,side,level,lnNumber,class,collapse='_'))%>%
+  left_join(clin.dat)%>%
+    mutate(TumorStage=gsub("T4a","pT4",gsub("pT4a","pT4",TumorStage)))%>%
+      rowwise()%>%
+  mutate(lside=ifelse(side=='RT','Right','Left'))%>%
+  mutate(lat=(ifelse(lside==TumorLaterality,'Ipsilateral','Contralateral')))
+
+
+
+write.table(all.samps,file='allLnSamps.csv')
+
+```
+
+## Sumamrize data by lymph node level
+
+How do each of the lymph node levels compare in distribution?
+
+```{r pressure, warning=FALSE, message=FALSE}
+library(ggplot2)
+pal <- nationalparkcolors::park_palette('GeneralGrant')
+clinvars<-c('class','side','level','sampid','patient','TumorStage','TumorLaterality','lat')
+dsamps<- all.samps%>%
+  mutate(class=factor(class,levels=c("Norm","Susp","Path")))%>%
+  dplyr::select(clinvars)%>%
+  distinct()
+
+ggplot(dsamps,aes(x=level,fill=class))+geom_bar(position='dodge')+scale_fill_manual(values=pal)+facet_grid(~TumorStage)
+
+```
+
+We seem to have ample features. But let's collapse a bit more to get more numbers. We can 
+
+```{r collapse samples}
+
+
+rsamps<- all.samps%>%
+  dplyr::select(clinvars)%>%
+  distinct()%>%
+    mutate(class=factor(class,levels=c("Norm","Susp","Path")))%>%
+  mutate(level=gsub('LIa','LI',gsub('LIb','LI',level)))%>%
+  mutate(level=gsub('LV',"LIII+",gsub("LIII","LIII+",level)))
+
+
+ggplot(rsamps,aes(x=level,fill=class))+geom_bar(position='dodge')+scale_fill_manual(values=pal)+facet_grid(lat~TumorStage)
+
+ggsave('lnDist.pdf')
+
+```
+
+Vivian only segmented affected lymph nodes, not healthy. Maybe we can get some more normals to build our model. However we can still count how many lymph nodes per level by patient to see what kind of data we get.
+
+```{r counts}
+
+cmat <- rsamps%>%
+#side==TumorLaterality))%>%
+  group_by(patient,level,lat)%>%
+  summarize(count=n())
+
+ggplot(cmat,aes(x=level,y=patient,fill=count))+geom_tile()+facet_grid(~lat)
+ggsave('lnCount.pdf')
+
+```
+
+
+##  Build predictive model of LN state from radiomics
+
+With the imaging data we have many features. To date we only selected a few classes of features, but we can add more if need be.
+
+```{r find predictive features}
+
+##here are the feature classes
+feats<-c('firstorder','glcm','gldm','glrlm','glszm','ngtdm','shape')
+
+###select the data itself and create matrix
+fo.matrix<-all.samps%>%subset(`Feature Class`%in%feats)%>%
+  subset(`Feature Name`!='GrayLevelVariance')%>%
+  mutate(feature=paste(`Feature Class`,`Feature Name`,collapse=':'))%>%
+  dplyr::select(c('sampid','feature','value'))%>%
+  unique()%>%
+  mutate(value=as.numeric(value))%>%
+  tidyr::pivot_wider(names_from=`feature`,values_from=value)%>%
+  tibble::column_to_rownames('sampid')
+
+annotes<-rsamps%>%
+  tibble::column_to_rownames('sampid')%>%
+  select(-patient)
+
+library(pheatmap)
+pheatmap(t(fo.matrix),annotation_col = annotes,cellheight=10,scale='row',show_colnames=FALSE)
+
+pheatmap(t(fo.matrix),annotation_col = annotes,cellheight=10,
+         scale='row',show_colnames=FALSE,filename = 'allFeatHeatmap.pdf',height=16,width=10)
+
+library(ggfortify)
+
+pca_res <- prcomp(fo.matrix,scale. = TRUE)
+
+autoplot(pca_res,data=annotes,colour='class',shape='level')+scale_color_manual(values=pal)+theme_bw()+ggtitle('Lymph nodes by radiomics features')
+ggsave('radFeaturesPCA.pdf')
+
+
+```
+
+Here we can see that there is good separation between normal and pathological lymph nodes. 
+
+Can we identify features that predict LN class or LN level?
+
+
+```{r find predictors,warning=FALSE,error=FALSE,message=FALSE}
+
+library(glmnet)
+##how should we select features???
+
+
+```
+
+
+Can we find the same features if we break down the classes and levels? 
+
+```{r find features}
+
+fo.df<-all.samps%>%subset(`Feature Class`%in%feats)%>%
+  subset(`Feature Name`!='GrayLevelVariance')%>%
+  mutate(feature=paste(`Feature Class`,`Feature Name`,collapse=':'))%>%
+  dplyr::select(c('sampid','feature','value'))%>%
+  unique()%>%
+  mutate(value=as.numeric(value))%>%
+  tidyr::pivot_wider(names_from=`feature`,values_from=value)%>%
+  left_join(rsamps)
+
+res<-fo.df%>%
+  dplyr::select(-c(sampid,patient,side))%>%
+  subset(class!='Susp')%>%
+  mutate(class=as.factor(class))%>%
+  group_by(level)%>%
+  group_map(~ broom::tidy(lm(class~.,data=.x)))
+
+
+```
