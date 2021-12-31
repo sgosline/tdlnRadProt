@@ -36,10 +36,10 @@ tumProts <- tumProts%>%
   mutate(patient=stringr::str_remove(patient,'-T'))
 
 
-##can we get lcinical too?
+##can we get clinical too?
 clin.dat<-read.table('data/HNSCC_Feb2021_clinical_data.csv',sep=',',header=T,check.names=F,quote='"')%>%
   dplyr::select(case_id,contains("lymph_node"))%>%### this gets us 8 different categories
-  rename(extranodal_extension="baseline/lymph_nodes_extranodal_extension",
+  dplyr::rename(extranodal_extension="baseline/lymph_nodes_extranodal_extension",
          staging="baseline/pathologic_staging_regional_lymph_nodes_pn",
          dissection_performed="baseline/lymph_node_neck_dissection_performed",
          dissection_left="baseline/method_of_lymph_node_neck_dissection_left",

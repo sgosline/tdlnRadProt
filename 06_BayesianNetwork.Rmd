@@ -1,0 +1,401 @@
+---
+title: "Build up the Bayesian network"
+author: "Song Feng"
+date: "08/07/2021"
+output: html_notebook
+---
+
+loading the package
+
+```{r}
+library(ggplot2)
+library(gplots)
+library(bnlearn)
+```
+
+Load the data
+
+```{r}
+source('loadHNSCCdata.R')
+library(reshape)
+tumProtTable <- cast(tumProts, Gene~patient, mean)
+rownames(tumProtTable) <- paste0(tumProtTable$Gene, "_T")
+tumProtTable$Gene <- NULL
+normProtTable <- cast(normProts, Gene~patient, mean)
+rownames(normProtTable) <- paste0(normProtTable$Gene, "_N")
+normProtTable$Gene <- NULL
+imgFeatTable <- cast(imgFeat, Feature_Type~patient, mean)
+rownames(imgFeatTable) <- imgFeatTable$Feature_Type
+imgFeatTable$Feature_Type <- NULL
+
+lnTableAll <- red.dat
+lnTableAll$affected <- abs(unclass(factor(lnTableAll$lnSpread)) - 2)
+lnTableAll$NoLN <- abs(unclass(factor(lnTableAll$lnCounts)) - 3)
+lnTable <- as.data.frame(lnTableAll[ ,c("patient", "affected", "NoLN")])
+lnAfTable <- as.data.frame(lnTableAll[ ,c("patient", "affected")])
+lnNoTable <- as.data.frame(lnTableAll[ ,c("patient", "NoLN")])
+
+rownames(lnTable) <- lnTable$patient
+rownames(lnAfTable) <- lnTable$patient 
+rownames(lnNoTable) <- lnTable$patient
+lnTable$patient <- NULL 
+lnAfTable$patient <- NULL 
+lnNoTable$patient <- NULL
+lnTableF <- as.data.frame(t(lnTable))
+lnAfTableF <- as.data.frame(t(lnAfTable))
+lnNoTableF <- as.data.frame(t(lnNoTable))
+```
+
+
+```{r}
+load("./analysis_SF/allCorrs.RData")
+```
+
+```{r}
+features <- c("Complexity", "InterquartileRange", "LeastAxisLength", "MajorAxisLength", "Maximum2DDiameterRow", "Maximum2DDiameterSlice", "MeshVolume", "SizeZoneNonUniformity", "SmallDependenceHighGrayLevelEmphasis", "SurfaceArea", "TotalEnergy", "VoxelVolume")
+
+imgFeatTableF <- imgFeatTable[features, ]
+imgFeatTableF
+```
+
+
+```{r}
+load("./analysis_SF/allRawCorrs.RData")
+
+filterCorr <- function(corTable, th = 0.6) {
+  return(as.data.frame(corTable[,colSums((corTable > th) | (corTable < -th))> 0]))
+}
+
+corrIfTpF <- filterCorr(corrIfTp[features,], 0.5) # 0.5
+tumSelected <- paste0(colnames(corrIfTpF), "_T")
+print(length(tumSelected))
+tumProtTableF <- tumProtTable[tumSelected,]
+corrIfNpF <- filterCorr(corrIfNp[features,], 0.6) # 0.6
+normSelected <- paste0(colnames(corrIfNpF), "_N")
+print(length(normSelected))
+normProtTableF <- normProtTable[normSelected,]
+```
+
+```{r}
+tumProtTableF
+```
+
+```{r}
+normProtTableF
+```
+
+
+
+```{r}
+col_names <- Reduce(intersect, list(colnames(imgFeatTableF), colnames(tumProtTableF), colnames(normProtTableF), colnames(lnTableF)))
+imgFeatProtTable <- data.frame(t(data.frame(rbind(imgFeatTableF[, col_names], tumProtTableF[, col_names], normProtTableF[, col_names], lnTableF[, col_names]))))
+imgFeatProtTable
+```
+
+
+```{r}
+rho = cor(imgFeatProtTable)
+heatmap.2(rho, scale = "none", trace = "none", revC = TRUE)#, breaks = palette.breaks)
+```
+
+```{r}
+ug = empty.graph(colnames(rho))
+amat(ug) = (rho > 0.6) + 0L - diag(1L, nrow(rho))
+graphviz.plot(ug, layout = "fdp", shape = "ellipse")
+```
+
+```{r}
+bl <- rbind(
+    set2blacklist(c(rownames(tumProtTableF), rownames(normProtTableF))), 
+    set2blacklist(rownames(lnTableF)), 
+    set2blacklist(rownames(imgFeatTableF)), 
+    tiers2blacklist(list(c(rownames(tumProtTableF), rownames(normProtTableF)),  
+                         rownames(imgFeatTableF))), 
+    tiers2blacklist(list(rownames(lnTableF), rownames(imgFeatTableF))),
+    tiers2blacklist(list(c(rownames(tumProtTableF), rownames(normProtTableF)), 
+                         rownames(lnTableF)))#,
+    # tiers2blacklist(list(c(rownames(tumProtTableF), rownames(normProtTableF)), 
+    #                      rownames(imgFeatTableF)))
+    )
+wl <- rbind(
+    tiers2blacklist(list(rownames(lnTableF), 
+                         c(rownames(tumProtTableF), rownames(normProtTableF)))),
+    # tiers2blacklist(list(rownames(imgFeatTableF), 
+    #                      c(rownames(tumProtTableF), rownames(normProtTableF)))),
+    tiers2blacklist(list(rownames(imgFeatTableF), rownames(lnTableF)))
+    )
+```
+
+
+
+
+```{r}
+str.raw = boot.strength(imgFeatProtTable, R = 100, algorithm = "hc", algorithm.args = list(blacklist = bl, whitelist = wl))
+attr(str.raw, "threshold")
+avg.raw.full = averaged.network(str.raw)
+```
+
+```{r}
+strength.plot(avg.raw.full, str.raw, shape = "ellipse")#, highlight = list(arcs = wl))
+```
+
+```{r}
+strength.plot(avg.raw.full, str.raw, threshold = 0.85, shape = "ellipse")#, highlight = list(arcs = wl))
+```
+
+
+```{r}
+
+avg.raw.full$learning$whitelist = wl
+avg.raw.full$learning$blacklist = bl
+nrow(undirected.arcs(cpdag(avg.raw.full, wlbl = TRUE)))
+```
+
+```{r}
+nrow(str.raw[with(str.raw, strength > 0.50 & direction > 0.50), ])
+```
+
+```{r}
+nrow(str.raw[with(str.raw, strength > 0.85 & direction > 0.50), ])
+```
+
+
+```{r}
+min(str.raw[with(str.raw, strength > 0.50 & direction > 0.50), "direction"])
+```
+
+
+```{r}
+avg.raw.simpler = averaged.network(str.raw, threshold = 0.8)
+g <- Rgraphviz::layoutGraph(bnlearn::as.graphNEL(avg.raw.simpler))
+graph::nodeRenderInfo(g) <- list(fontsize=100)
+Rgraphviz::renderGraph(g)
+strength.plot(avg.raw.simpler, str.raw, shape = "ellipse")#, highlight = list(arcs = wl))
+```
+
+```{r}
+dag = hc(imgFeatProtTable, whitelist = wl, blacklist = bl)
+dag
+```
+
+```{r}
+str.raw = boot.strength(imgFeatProtTable, R = 100, algorithm = "hc")#, algorithm.args = list(blacklist = bl, whitelist = wl))
+attr(str.raw, "threshold")
+avg.raw.full = averaged.network(str.raw)
+```
+
+```{r}
+strength.plot(avg.raw.full, str.raw, shape = "ellipse")#, highlight = list(arcs = wl))
+```
+
+```{r}
+xval = bn.cv(imgFeatProtTable, bn = "hc", algorithm.args = list(blacklist = bl, whitelist = wl), loss = "cor-lw", loss.args = list(target = "affected", n = 200), runs = 10)
+```
+
+# Compare different models and features
+
+```{r}
+col_names <- Reduce(intersect, list(colnames(imgFeatTableF), colnames(tumProtTableF), colnames(normProtTableF), colnames(lnTableF)))
+
+img_prot_af <- data.frame(t(data.frame(rbind(imgFeatTableF[, col_names], tumProtTableF[, col_names], normProtTableF[, col_names], lnAfTableF[, col_names]))))
+img_tum_af <- data.frame(t(data.frame(rbind(imgFeatTableF[, col_names], tumProtTableF[, col_names], lnAfTableF[, col_names]))))
+img_norm_af <- data.frame(t(data.frame(rbind(imgFeatTableF[, col_names], normProtTableF[, col_names], lnAfTableF[, col_names]))))
+img_af <- data.frame(t(data.frame(rbind(imgFeatTableF[, col_names], lnAfTableF[, col_names]))))
+prot_af <- data.frame(t(data.frame(rbind(tumProtTableF[, col_names], normProtTableF[, col_names], lnAfTableF[, col_names]))))
+
+img_prot_no <- data.frame(t(data.frame(rbind(imgFeatTableF[, col_names], tumProtTableF[, col_names], normProtTableF[, col_names], lnNoTableF[, col_names]))))
+img_no <- data.frame(t(data.frame(rbind(imgFeatTableF[, col_names], lnNoTableF[, col_names]))))
+prot_no <- data.frame(t(data.frame(rbind(tumProtTableF[, col_names], normProtTableF[, col_names], lnNoTableF[, col_names]))))
+```
+
+```{r}
+bn_img_af <- empty.graph(c(rownames(imgFeatTableF), rownames(lnAfTableF)))
+wl_img_af <- tiers2blacklist(list(rownames(lnAfTableF), rownames(imgFeatTableF)))
+arcs(bn_img_af) <- wl_img_af
+
+bn_prot_af <- empty.graph(c(rownames(tumProtTableF), rownames(normProtTableF), rownames(lnAfTableF)))
+wl_prot_af <- tiers2blacklist(list(rownames(lnAfTableF), c(rownames(tumProtTableF), rownames(normProtTableF))))
+arcs(bn_prot_af) <- wl_prot_af
+
+bn_prot_img_af <- empty.graph(c(rownames(imgFeatTableF), rownames(tumProtTableF), rownames(normProtTableF), rownames(lnAfTableF)))
+wl_prot_img_af <- rbind(
+  tiers2blacklist(list(rownames(lnAfTableF), rownames(imgFeatTableF))),
+  tiers2blacklist(list(rownames(imgFeatTableF), c(rownames(tumProtTableF), rownames(normProtTableF))))
+)
+arcs(bn_prot_img_af) <- wl_prot_img_af
+
+bn_tum_img_af <- empty.graph(c(rownames(imgFeatTableF), rownames(tumProtTableF), rownames(lnAfTableF)))
+wl_tum_img_af <- rbind(
+  tiers2blacklist(list(rownames(lnAfTableF), rownames(imgFeatTableF))),
+  tiers2blacklist(list(rownames(imgFeatTableF), c(rownames(tumProtTableF))))
+)
+arcs(bn_tum_img_af) <- wl_tum_img_af
+
+bn_norm_img_af <- empty.graph(c(rownames(imgFeatTableF), rownames(normProtTableF), rownames(lnAfTableF)))
+wl_norm_img_af <- rbind(
+  tiers2blacklist(list(rownames(lnAfTableF), rownames(imgFeatTableF))),
+  tiers2blacklist(list(rownames(imgFeatTableF), rownames(normProtTableF)))
+)
+arcs(bn_norm_img_af) <- wl_norm_img_af
+
+bn_prot_img_id_af <- empty.graph(c(rownames(imgFeatTableF), rownames(tumProtTableF), rownames(normProtTableF), rownames(lnAfTableF)))
+wl_prot_img_id_af <- tiers2blacklist(list(rownames(lnAfTableF), c(rownames(imgFeatTableF), rownames(tumProtTableF), rownames(normProtTableF))))
+arcs(bn_prot_img_id_af) <- wl_prot_img_id_af
+```
+
+```{r}
+bn_img_no <- empty.graph(c(rownames(imgFeatTableF), rownames(lnNoTableF)))
+wl_img_no <- tiers2blacklist(list(rownames(lnNoTableF), rownames(imgFeatTableF)))
+arcs(bn_img_no) <- wl_img_no
+
+bn_prot_no <- empty.graph(c(rownames(tumProtTableF), rownames(normProtTableF), rownames(lnNoTableF)))
+wl_prot_no <- tiers2blacklist(list(rownames(lnNoTableF), c(rownames(tumProtTableF), rownames(normProtTableF))))
+arcs(bn_prot_no) <- wl_prot_no
+
+bn_prot_img_no <- empty.graph(c(rownames(imgFeatTableF), rownames(tumProtTableF), rownames(normProtTableF), rownames(lnNoTableF)))
+wl_prot_img_no <- rbind(
+  tiers2blacklist(list(rownames(lnNoTableF), rownames(imgFeatTableF))),
+  tiers2blacklist(list(rownames(imgFeatTableF), c(rownames(tumProtTableF), rownames(normProtTableF))))
+)
+arcs(bn_prot_img_no) <- wl_prot_img_no
+
+bn_prot_img_id_no <- empty.graph(c(rownames(imgFeatTableF), rownames(tumProtTableF), rownames(normProtTableF), rownames(lnNoTableF)))
+wl_prot_img_id_no <- tiers2blacklist(list(rownames(lnNoTableF), c(rownames(imgFeatTableF), rownames(tumProtTableF), rownames(normProtTableF))))
+arcs(bn_prot_img_id_no) <- wl_prot_img_id_no
+```
+
+
+```{r}
+graphviz.plot(bn_img_af)
+graphviz.plot(bn_prot_af)
+graphviz.plot(bn_prot_img_af)
+graphviz.plot(bn_prot_img_id_af)
+graphviz.plot(bn_tum_img_af)
+graphviz.plot(bn_norm_img_af)
+```
+
+
+
+```{r}
+img_af_cv <- bn.cv(img_af, bn = bn_img_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+prot_af_cv <- bn.cv(prot_af, bn = bn_prot_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_prot_af_cv <- bn.cv(img_prot_af, bn = bn_prot_img_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_tum_af_cv <- bn.cv(img_tum_af, bn = bn_tum_img_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_norm_af_cv <- bn.cv(img_norm_af, bn = bn_norm_img_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_prot_id_af_cv <- bn.cv(img_prot_af, bn = bn_prot_img_id_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+```
+
+```{r}
+plot(img_af_cv, prot_af_cv, img_prot_af_cv, img_tum_af_cv, img_norm_af_cv, img_prot_id_af_cv, xlab = c("Image only", "Proteomics only", "Proteomics -> Image", "Tum prot -> Image", "Norm prot -> Image", "Image + Proteomics"))
+plot(img_af_cv, img_prot_af_cv, xlab = c("Image only", "Proteomics -> Image"))
+plot(img_af_cv, img_prot_af_cv, img_tum_af_cv, img_norm_af_cv, xlab = c("Image only", "Proteomics -> Image", "Tum prot -> Image", "Norm prot -> Image"))
+```
+
+
+```{r}
+save(img_af_cv, prot_af_cv, img_prot_af_cv, img_tum_af_cv, img_norm_af_cv, img_prot_id_af_cv, file = "./analysis_SF/comparisons.RData")
+```
+
+
+valid learning algorithm(s) are "gs" (Grow-Shrink), "iamb" (IAMB), "fast.iamb" (Fast-IAMB), "inter.iamb" (Inter-IAMB), "iamb.fdr" (IAMB-FDR), "pc.stable" (PC (Stable)), "mmpc" (Max-Min Parent Children), "si.hiton.pc" (Semi-Interleaved HITON-PC), "hpc" (Hybrid Parents and Children), "hc" (Hill-Climbing), "tabu" (Tabu Search), "rsmax2" (Two-Phase Restricted Maximization), "mmhc" (Max-Min Hill-Climbing), "h2pc" (Hybrid^2 Parent Children), "chow.liu" (Chow-Liu), "aracne" (ARACNE), "naive.bayes" (Naive Bayes Classifier), "tree.bayes" (TAN Bayes Classifier). See ?bnlearn-package for details.
+
+
+```{r}
+img_af_ho <- bn.cv(img_af, bn = bn_img_af, runs = 10, method = "hold-out", k = 10, m = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+prot_af_ho <- bn.cv(prot_af, bn = bn_prot_af, runs = 10, method = "hold-out", k = 10, m = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_prot_af_ho <- bn.cv(img_prot_af, bn = bn_prot_img_af, runs = 10, method = "hold-out", k = 10, m = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_tum_af_ho <- bn.cv(img_tum_af, bn = bn_tum_img_af, runs = 10, method = "hold-out", k = 10, m = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_norm_af_ho <- bn.cv(img_norm_af, bn = bn_norm_img_af, runs = 10, method = "hold-out", k = 10, m = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_prot_id_af_ho <- bn.cv(img_prot_af, bn = bn_prot_img_id_af, runs = 10, method = "hold-out", k = 10, m = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+plot(img_af_ho, prot_af_ho, img_prot_af_ho, img_tum_af_ho, img_norm_af_ho, img_prot_id_af_ho, xlab = c("Image only", "Proteomics only", "Proteomics -> Image", "Tum prot -> Image", "Norm prot -> Image", "Image + Proteomics"))
+plot(img_af_ho, img_prot_af_ho, xlab = c("Image only", "Proteomics -> Image"))
+plot(img_af_ho, img_prot_af_ho, img_tum_af_ho, img_norm_af_ho, xlab = c("Image only", "Proteomics -> Image", "Tum prot -> Image", "Norm prot -> Image"))
+```
+
+
+
+```{r}
+img_af_cv <- bn.cv(img_af, bn = bn_img_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+prot_af_cv <- bn.cv(prot_af, bn = bn_prot_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_prot_af_cv <- bn.cv(img_prot_af, bn = bn_prot_img_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+img_prot_id_af_cv <- bn.cv(img_prot_af, bn = bn_prot_img_id_af, runs = 10, loss = "mse-lw", loss.args = list(target = "affected"))
+plot(img_af_cv, prot_af_cv, img_prot_af_cv, img_prot_id_af_cv, xlab = c("Image only", "Proteomics only", "Proteomics -> Image", "Image + Proteomics"))
+plot(img_af_cv, img_prot_af_cv, xlab = c("Image only", "Proteomics -> Image"))
+```
+
+
+```{r}
+img_af_cv <- bn.cv(img_af, bn = bn_img_af, runs = 10, loss = "mse", loss.args = list(target = "affected"))
+prot_af_cv <- bn.cv(prot_af, bn = bn_prot_af, runs = 10, loss = "mse", loss.args = list(target = "affected"))
+img_prot_af_cv <- bn.cv(img_prot_af, bn = bn_prot_img_af, runs = 10, loss = "mse", loss.args = list(target = "affected"))
+img_prot_id_af_cv <- bn.cv(img_prot_af, bn = bn_prot_img_id_af, runs = 10, loss = "mse", loss.args = list(target = "affected"))
+plot(img_af_cv, prot_af_cv, img_prot_af_cv, img_prot_id_af_cv, xlab = c("Image only", "Proteomics only", "Proteomics -> Image", "Image + Proteomics"))
+plot(img_af_cv, img_prot_af_cv, xlab = c("Image only", "Proteomics -> Image"))
+```
+
+
+```{r}
+img_no_cv <- bn.cv(img_no, bn = bn_img_no, runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+prot_no_cv <- bn.cv(prot_no, bn = bn_prot_no, runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+img_prot_no_cv <- bn.cv(img_prot_no, bn = bn_prot_img_no, runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+img_prot_id_no_cv <- bn.cv(img_prot_no, bn = bn_prot_img_id_no, runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+plot(img_no_cv, prot_no_cv, img_prot_no_cv, img_prot_id_no_cv, xlab = c("Image only", "Proteomics only", "Proteomics -> Image", "Image + Proteomics"))
+plot(img_no_cv, img_prot_no_cv, xlab = c("Image only", "Proteomics -> Image"))
+```
+
+
+
+
+
+
+
+
+# Tests
+
+```{r}
+img_af_cv <- bn.cv(img_af, bn = "hc", runs = 10, loss = "mse", loss.args = list(target = "affected"))
+prot_af_cv <- bn.cv(prot_af, bn = "hc", runs = 10, loss = "mse", loss.args = list(target = "affected"))
+img_prot_af_cv <- bn.cv(img_prot_af, bn = "hc", runs = 10, loss = "mse", loss.args = list(target = "affected"))
+plot(img_af_cv, prot_af_cv, img_prot_af_cv, xlab = c("Image only", "Proteomics only", "Image + Proteomics"))
+```
+
+
+```{r}
+img_no_cv <- bn.cv(img_no, bn = "tabu", runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+prot_no_cv <- bn.cv(prot_no, bn = "tabu", runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+img_prot_no_cv <- bn.cv(img_prot_no, bn = "tabu", runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+plot(img_no_cv, prot_no_cv, img_prot_no_cv, xlab = c("Image only", "Proteomics only", "Image + Proteomics"))
+```
+
+
+```{r}
+img_no_cv <- bn.cv(img_no, bn = "hc", runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+prot_no_cv <- bn.cv(prot_no, bn = "hc", runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+img_prot_no_cv <- bn.cv(img_prot_no, bn = "hc", runs = 10, loss = "mse", loss.args = list(target = "NoLN"))
+plot(img_no_cv, prot_no_cv, img_prot_no_cv, xlab = c("Image only", "Proteomics only", "Image + Proteomics"))
+```
+
+
+# Using other models to do the cross validation, like AutoML?
+
+```{r}
+
+```
+
+
+
+# Hidden Markov Model for modeling the lymphinode dynamics
+
+
+
+
+
+
+
+
+
+
+
+
+
+
