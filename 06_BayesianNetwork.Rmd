@@ -94,6 +94,13 @@ imgFeatProtTable
 
 
 ```{r}
+col_names <- Reduce(intersect, list(colnames(imgFeatTableF), colnames(tumProtTableF), colnames(normProtTableF)))
+imgFeatProtTable <- data.frame(t(data.frame(rbind(imgFeatTableF[, col_names], tumProtTableF[, col_names], normProtTableF[, col_names]))))
+imgFeatProtTable
+```
+
+
+```{r}
 rho = cor(imgFeatProtTable)
 heatmap.2(rho, scale = "none", trace = "none", revC = TRUE)#, breaks = palette.breaks)
 ```
@@ -127,20 +134,41 @@ wl <- rbind(
 ```
 
 
+```{r}
+bl <- rbind(
+    # set2blacklist(c(rownames(tumProtTableF), rownames(normProtTableF))),
+    # set2blacklist(rownames(lnTableF)),
+    # set2blacklist(rownames(imgFeatTableF)), 
+    # tiers2blacklist(list(c(rownames(tumProtTableF), rownames(normProtTableF)),  
+    #                      rownames(imgFeatTableF))), 
+    # tiers2blacklist(list(rownames(imgFeatTableF), rownames(lnTableF))),
+    # tiers2blacklist(list(c(rownames(tumProtTableF), rownames(normProtTableF)),
+    #                      rownames(lnTableF)))#,
+    # tiers2blacklist(list(c(rownames(tumProtTableF), rownames(normProtTableF)), 
+    #                      rownames(imgFeatTableF)))
+    )
+wl <- rbind(
+    # tiers2blacklist(list(rownames(lnTableF), 
+    #                      c(rownames(tumProtTableF), rownames(normProtTableF)))),
+    # tiers2blacklist(list(rownames(imgFeatTableF), 
+    #                      c(rownames(tumProtTableF), rownames(normProtTableF)))),
+    # tiers2blacklist(list(rownames(imgFeatTableF), rownames(lnTableF)))
+    )
+```
 
 
 ```{r}
-str.raw = boot.strength(imgFeatProtTable, R = 100, algorithm = "hc", algorithm.args = list(blacklist = bl, whitelist = wl))
+str.raw = boot.strength(imgFeatProtTable, R = 500, algorithm = "hc", algorithm.args = list(blacklist = bl, whitelist = wl))
 attr(str.raw, "threshold")
 avg.raw.full = averaged.network(str.raw)
 ```
 
 ```{r}
-strength.plot(avg.raw.full, str.raw, shape = "ellipse")#, highlight = list(arcs = wl))
+strength.plot(avg.raw.full, str.raw, shape = "rectangle", layout = "dot")#, highlight = list(arcs = wl))
 ```
 
 ```{r}
-strength.plot(avg.raw.full, str.raw, threshold = 0.85, shape = "ellipse")#, highlight = list(arcs = wl))
+strength.plot(avg.raw.full, str.raw, threshold = 0.6, shape = "rectangle", layout = "dot")#, highlight = list(arcs = wl))
 ```
 
 
@@ -179,7 +207,7 @@ dag
 ```
 
 ```{r}
-str.raw = boot.strength(imgFeatProtTable, R = 100, algorithm = "hc")#, algorithm.args = list(blacklist = bl, whitelist = wl))
+str.raw = boot.strength(imgFeatProtTable, R = 100, algorithm = "hc", algorithm.args = list(blacklist = bl, whitelist = wl))
 attr(str.raw, "threshold")
 avg.raw.full = averaged.network(str.raw)
 ```
