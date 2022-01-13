@@ -132,17 +132,17 @@ fo.matrix<-all.samps%>%subset(`Feature Class`%in%feats)%>%
 
 annotes<-rsamps%>%
   tibble::column_to_rownames('sampid')%>%
-  select(-patient)
+  select(-c(patient,side,TumorLaterality))
 
 library(pheatmap)
-pheatmap(t(fo.matrix),annotation_col = annotes,cellheight=10,scale='row',show_colnames=FALSE)
+pheatmap(t(fo.matrix),annotation_col = annotes,scale='row',show_colnames=FALSE,show_rownames=F)
 
-pheatmap(t(fo.matrix),annotation_col = annotes,cellheight=10,
-         scale='row',show_colnames=FALSE,filename = 'allFeatHeatmap.pdf',height=16,width=10)
+pheatmap(t(fo.matrix),annotation_col = annotes,show_rownames=F,
+         scale='row',show_colnames=FALSE,filename = 'allFeatHeatmap.pdf')
 
 library(ggfortify)
 
-pca_res <- prcomp(fo.matrix,scale. = TRUE)
+pca_res <- prcomp(fo.matrix,scale. = TRUE, center=TRUE)
 
 autoplot(pca_res,data=annotes,colour='class',shape='level')+scale_color_manual(values=pal)+theme_bw()+ggtitle('Lymph nodes by radiomics features')
 ggsave('radFeaturesPCA.pdf')
