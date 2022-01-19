@@ -1,0 +1,282 @@
+---
+title: "Modeling by Survival"
+author: "Sara Gosline"
+date: "1/12/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('loadHNSCCdata.R')
+library(ggplot2)
+```
+
+## First collect all data
+
+We collect all protein data, mRNA data, imaging data
+
+```{r cars}
+imgs<-imgFeat%>%mutate(feat=paste(Feature_Class,Feature_Type))%>%
+  dplyr::select(patient,value,feat)
+
+imgMat <- imgs%>%
+  pivot_wider(values_from='value',names_from='feat')%>%
+  tibble::column_to_rownames('patient')
+
+tprots <-tumProts%>%
+  #mutate(feat=paste0(Gene,'_T'))%>%
+  rename(value='inferredTumAbund',feat='Gene')%>%
+  dplyr::select(patient,value,feat)
+
+tmat <- tprots%>%
+    pivot_wider(values_from='value',names_from='feat')%>%
+  tibble::column_to_rownames('patient')
+
+##can we also get transcriptomics? 
+
+pal <- nationalparkcolors::park_palette('GeneralGrant')
+
+
+```
+
+## Now let'st ry to predict something
+
+How well does each data modality predict tumor outcome? 
+
+### Elastic nets
+Let's try `glmnet` first
+
+```{r}
+library(glmnet)
+
+oc<-clin.prog.dat%>%
+ # subset(patient%in%rownames(fullFeat))%>%
+  subset(!is.na(outcome))%>%
+  subset(outcome!='Unknown Tumor Status')
+
+ovar<-as.numeric(as.factor(oc$outcome))-1
+names(ovar)<-oc$patient
+
+svar<-as.factor(oc$stage)
+names(svar)<-oc$patient
+
+
+```
+
+#### Imaging alone
+```{r}
+ipats<-intersect(names(ovar),rownames(imgMat))
+cv.res <-cv.glmnet(x=as.matrix(imgMat[ipats,]),y=ovar[ipats],alpha=0.5,nfolds = 20,type.measure='mse',family='binomial')
+
+best.res<-data.frame(lambda=cv.res$lambda,MSE=cv.res$cvm)%>%
+    subset(MSE==min(MSE))
+  
+try(full.res<-glmnet(x=as.matrix(imgMat[ipats,]),y=ovar[ipats],alpha=0.5,family='binomial',type.measure='mse'))
+
+preds <- predict.glmnet(full.res,newx=as.matrix(imgMat[ipats,]))[,which(full.res$lambda==best.res$lambda)]
+
+feats=names(which(full.res$beta[,which(full.res$lambda==best.res$lambda)]!=0))
+
+cv = cor(preds,ovar[ipats],use='pairwise.complete.obs',method='spearman')
+lm.img <- data.frame(var='',rel.inf=0,cor=0,data='Imaging',model='Regression')
+
+```
+
+nothing shows up for imaging
+
+#### Proteomics alone
+```{r}
+
+tpats<-intersect(names(ovar),rownames(tmat))
+cv.res <-cv.glmnet(x=as.matrix(tmat[tpats,]),y=ovar[tpats],alpha=0.5,nfolds = 20,type.measure='mse',family='binomial')
+
+best.res<-data.frame(lambda=cv.res$lambda,MSE=cv.res$cvm)%>%
+    subset(MSE==min(MSE))
+  
+try(full.res<-glmnet(x=as.matrix(tmat[tpats,]),y=ovar[tpats],alpha=0.5,family='binomial',type.measure='mse'))
+
+preds <- predict.glmnet(full.res,newx=as.matrix(tmat[tpats,]))[,which(full.res$lambda==best.res$lambda)]
+
+feats=names(which(full.res$beta[,which(full.res$lambda==best.res$lambda)]!=0))
+featsvals<-full.res$beta[feats,which(full.res$lambda==best.res$lambda)]
+cv = cor(preds,ovar[tpats],use='pairwise.complete.obs',method='spearman')
+library(pheatmap)
+ pheatmap(t(tmat[,feats]),annotation_col = tibble::column_to_rownames(clin.prog.dat,'patient'),clustering_distance_cols = 'correlation', clustering_method = 'ward.D2',cellheight = 10,scale='row',filename='protFeatsFromGLM.pdf')
+ 
+lm.prot <- data.frame(var=feats,rel.inf=featsvals,cor=cv,data='Proteomics',model='Regression')
+cv
+```
+
+we have 15 proteins!! correlation of 0.62
+
+
+```{r glm with both values}
+
+cpats<-intersect(names(ovar),intersect(rownames(tmat),rownames(imgMat)))
+cmat<-cbind(tmat[cpats,],imgMat[cpats,])
+
+
+cv.res <-cv.glmnet(x=as.matrix(cmat),y=ovar[cpats],alpha=0.5,nfolds = 20,type.measure='mse',family='binomial')
+
+best.res<-data.frame(lambda=cv.res$lambda,MSE=cv.res$cvm)%>%
+    subset(MSE==min(MSE))
+  
+try(full.res<-glmnet(x=as.matrix(cmat[cpats,]),y=ovar[cpats],alpha=0.5,family='binomial',type.measure='mse'))
+
+preds <- predict.glmnet(full.res,newx=as.matrix(cmat[cpats,]))[,which(full.res$lambda==best.res$lambda)]
+
+feats=names(which(full.res$beta[,which(full.res$lambda==best.res$lambda)]!=0))
+featsvals<-full.res$beta[feats,which(full.res$lambda==best.res$lambda)]
+cv = cor(preds,ovar[cpats],use='pairwise.complete.obs',method='spearman')
+library(pheatmap)
+ pheatmap(t(cmat[,feats]),annotation_col = tibble::column_to_rownames(clin.prog.dat,'patient'),clustering_distance_cols = 'correlation', clustering_method = 'ward.D2',cellheight = 10,scale='row',filename='combFeatsFromGLM.pdf')
+ 
+lm.comb <- data.frame(var=feats,rel.inf=featsvals,cor=cv,data='Proteomics and Imaging',model='Regression')
+cv
+
+```
+
+
+### Lets try gradient boosted trees!!
+
+This method is supposed to better
+
+
+```{r gbm function}
+
+##define a function on gbm that iterate through a space of parameters
+gbm.iter <- function(yvar, mat){
+
+    hyper_grid <- expand.grid(
+    shrinkage = c(.01, .1, .3),
+    interaction.depth = c(1, 3, 5),
+    n.minobsinnode = c(5, 10, 15),
+    bag.fraction = c(.8, 1), 
+    optimal_trees = 0,               # a place to dump results
+    min_RMSE = 0  )                   # a place to dump results
+
+    tdat <- data.frame(y=yvar,mat)
+    
+  random_index <- sample(1:nrow(tdat), nrow(tdat))
+  random_tdat<- tdat[random_index, ]
+
+# grid search 
+res<-lapply(c(1:nrow(hyper_grid)),function(i){
+  message(paste0("Iteration ",i,' of ',nrow(hyper_grid)))
+  # reproducibility
+  set.seed(123)
+  
+  # train model
+  gbm.tune <- gbm(
+    formula = y ~ .,
+    distribution = "bernoulli",
+    data = random_tdat,
+    n.trees = 5000,
+    #cv.folds = 3,
+    interaction.depth = hyper_grid$interaction.depth[i],
+    shrinkage = hyper_grid$shrinkage[i],
+    n.minobsinnode = hyper_grid$n.minobsinnode[i],
+    bag.fraction = hyper_grid$bag.fraction[i],
+    train.fraction = .75,
+    n.cores = NULL, # will use all cores by default
+    verbose = FALSE
+  )
+  
+  # add min training error and trees to grid
+  hyper_grid$optimal_trees[i] <<- which.min(gbm.tune$valid.error)
+  hyper_grid$min_RMSE[i] <<- sqrt(min(gbm.tune$valid.error))
+})
+
+  tres <-  hyper_grid %>% 
+     dplyr::arrange(min_RMSE)
+  # train GBM model
+  gbm.fit.final <- gbm(
+    formula = y ~ .,
+    distribution = "bernoulli",
+    data = tdat,
+    n.trees = tres$optimal_trees[1],
+    interaction.depth = tres$interaction.depth[1],
+    shrinkage =tres$shrinkage[1],
+    n.minobsinnode = tres$n.minobsinnode[1],
+    bag.fraction = tres$bag.fraction[1], 
+    train.fraction = 1,
+    n.cores = NULL, # will use all cores by default
+      verbose = FALSE
+    )
+  
+  gbm.fit.final
+    
+}
+
+
+```
+#### Imaging features alone
+
+```{r}
+require(gbm)
+
+ipats<-intersect(names(ovar),rownames(imgMat))
+
+image.fit <- gbm.iter(ovar[ipats],imgMat[ipats,])
+
+
+img.fit.sum <- summary(image.fit)%>%subset(rel.inf!=0)%>%
+  mutate(cor=cor(predict(image.fit),ovar[ipats]))%>%
+  mutate(data='Imaging',model='Gradient Boosted Trees')
+
+feats<-sapply(img.fit.sum$var,function(x) gsub('.',' ',x,fixed=T))
+library(pheatmap)
+pheatmap(t(imgMat[,feats]),annotation_col = tibble::column_to_rownames(clin.prog.dat,'patient'),cellheight = 10,scale='row',clustering_distance_cols = 'correlation', clustering_method = 'ward.D2', filename='imgFeatsFromGBM.pdf')
+```
+We got some features!
+
+#### Proteomic features
+```{r}
+require(gbm)
+
+tpats<-intersect(names(ovar),rownames(tmat))
+prot.fit <- gbm.iter(ovar[tpats],tmat[tpats,])
+
+
+prot.fit.sum <- summary(prot.fit)%>%subset(rel.inf!=0)%>%
+  mutate(cor=cor(predict(prot.fit),ovar[tpats]))%>%
+  mutate(data='Proteomics',model='Gradient Boosted Trees')
+
+feats<-sapply(prot.fit.sum$var,function(x) gsub('.','-',x,fixed=T))
+
+ pheatmap(t(tmat[,feats]),annotation_col = tibble::column_to_rownames(clin.prog.dat,'patient'),clustering_distance_cols = 'correlation', clustering_method = 'ward.D2',cellheight = 10,scale='row',filename='protFeatsFromGBM.pdf')
+ 
+```
+
+#### Combined
+
+now we can combine imaging and proteomics
+
+```{r}
+
+cpats<-intersect(names(ovar),intersect(rownames(tmat),rownames(imgMat)))
+comb.fit <- gbm.iter(ovar[cpats],cbind(tmat[cpats,],imgMat[cpats,]))
+
+comb.fit.sum <-summary(comb.fit)%>%subset(rel.inf!=0)%>%
+  mutate(cor=cor(predict(comb.fit),ovar[cpats]))%>%
+  mutate(data='Proteomics and Imaging', model='Gradient Boosted Trees')
+
+feats<-sapply(comb.fit.sum$var,function(x) gsub('.','-',x,fixed=T))
+
+ pheatmap(t(tmat[,feats]),annotation_col = tibble::column_to_rownames(clin.prog.dat,'patient'),cellheight = 10,scale='row',filename='combFeatsFromGBM.pdf')
+
+```
+
+Plotting the performance of all three models shows the improved performance.
+
+```{R comb perf}
+
+full.perf <- rbind(comb.fit.sum, prot.fit.sum, img.fit.sum,lm.comb,lm.img,lm.prot)
+
+full.perf%>%dplyr::select(data,cor,model)%>%distinct()%>%
+  ggplot(aes(x=data,y=cor,fill=model))+geom_bar(stat='identity',position='dodge')+scale_fill_manual(values=pal)
+ggsave('tumorModelPerf.pdf')
+```
+### Networks from proteomics
+
+The proteomics data was also good in and of...

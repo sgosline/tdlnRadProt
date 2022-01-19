@@ -1,0 +1,114 @@
+---
+title: "Differentialy expression by Survival"
+author: "Sara Gosline"
+date: "7/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('loadHNSCCdata.R')
+```
+
+
+## Dive into lymph node status to investigate possible data separation
+
+To build a model we want to break down patient samples into various classes based on their lymph node status. 
+
+Let's first start by seeing how many patients have positive lymph nodes:
+
+```{r plot of LN counts, warn=FALSE}
+       ggplot(clin.prog.dat,aes(x=stage,fill=outcome))+geom_bar(position='dodge')+
+  scale_fill_manual(values=pal)
+```
+       
+## Differential tumor expression
+
+Now we can compute proteins that are differentially expressed between LN classes.
+
+```{r differential expression}
+library(limma)
+
+#create data matrix of samples and collect patients
+protMat<-tumProts%>%
+        pivot_wider(values_from='inferredTumAbund',names_from='patient')%>%
+        tibble::column_to_rownames('Gene')
+
+withTum=clin.prog.dat%>%subset(outcome=='With Tumor')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+noTum=clin.prog.dat%>%subset(outcome=='Tumor Free')%>%
+        select(patient)%>%
+        subset(patient%in%colnames(protMat))
+
+
+doLim<-function(dat,sampleIDs.group1,sampleIDs.group2){
+  fac <- factor(rep(c(2,1), c(length(sampleIDs.group2), length(sampleIDs.group1))))
+  design <- model.matrix(~fac)
+  fit <- lmFit(dat[,c(sampleIDs.group2, sampleIDs.group1)], design)
+  fit <- eBayes(fit)
+  res <- topTable(fit, coef=2, number=Inf, sort.by="none")
+  res <- data.frame(featureID=rownames(res), res, stringsAsFactors = F)
+  return(res)
+}
+
+oneVsZero=doLim(protMat,withTum$patient,noTum$patient)
+
+oneVsZero%>%subset(P.Value<0.001)%>%
+  rename(Gene='featureID')%>%left_join(tumProts)%>%
+  left_join(clin.prog.dat)%>%
+  subset(!is.na(outcome))%>%
+  ggplot(aes(x=Gene,y=inferredTumAbund))+geom_boxplot(aes(fill=outcome))+scale_x_discrete(guide = guide_axis(angle = 90))+ggtitle('Proteins somewhat differentially expressed at p<0.001')+scale_fill_manual(values=pal)
+##now 
+
+library(pheatmap)
+prots<-oneVsZero%>%subset(P.Value<0.005)
+pheatmap(protMat[prots$featureID,],annotation_col = tibble::column_to_rownames(clin.prog.dat,'patient'))
+
+pheatmap(protMat[prots$featureID,],annotation_col = tibble::column_to_rownames(clin.prog.dat,'patient'),filename = 'hnsccSurvProts.pdf',cellheight = 10)
+
+
+```
+
+So we have some proteins!! Only 1 is differentially expressed. Let's try some GSEA analysis instead to see if we can find biological processes enriched.
+
+### Biological pathway enrichment
+
+Let's compute the pathways (NCI Pathways) enriched upon proteins that are different between zero and 1/2 LN affected
+
+```{r biological pathways,warning=FALSE}
+library(leapr)
+
+data("ncipid")
+data('krbpaths')
+z.en <- leapR(geneset=ncipid,  enrichment_method='enrichment_in_order',datamatrix=oneVsZero,primary_columns='logFC')%>%
+        subset(BH_pvalue<0.1)
+
+DT::datatable(select(z.en,-ingroupnames))
+
+```
+
+### Network of selected proteins
+
+Now that we have the pathways let's plot them in a PPI
+
+```{r, plot samples,warning=FALSE}
+  zprots=subset(oneVsZero,P.Value<0.004)%>%select(featureID, logFC)
+
+library(PCSF)
+
+data("STRING")
+ppi <- construct_interactome(STRING)
+terms<-abs(zprots$logFC)
+names(terms)<-zprots$featureID
+
+resnet <- PCSF_rand(ppi,terminals=terms,b=4,w=2,n=100)
+##let's first do a PCA plotted with positive lns
+plot.PCSF(resnet)
+
+```
+
+
+From this network we can explain the differential expression we saw. 
+

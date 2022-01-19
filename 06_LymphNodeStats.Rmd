@@ -39,7 +39,7 @@ all.samps<-do.call(rbind,lapply(lnfiles,function(lnfi){
 
 
 ##now lets collect clinical data
-clin.dat<-read.table('data/HNSCC_Feb2021_clinical_data.csv',sep=',',header=T,check.names=F,quote='"')%>%
+clin.dat<-readxl::read_xlsx('data/HNSCC_Feb2021_clinical_data.xlsx')%>%
   dplyr::select(TumorStage="baseline/pathologic_staging_primary_tumor_pt",patient="case_id",TumorSite="baseline/tumor_site",TumorLaterality="baseline/tumor_laterality")%>%distinct()
  
 
@@ -135,9 +135,9 @@ annotes<-rsamps%>%
   select(-c(patient,side,TumorLaterality))
 
 library(pheatmap)
-pheatmap(t(fo.matrix),annotation_col = annotes,scale='row',show_colnames=FALSE,show_rownames=F)
+pheatmap(t(fo.matrix),annotation_col = annotes,scale='row',clustering_distance_cols = 'correlation',clustering_method = 'ward.D2',show_colnames=FALSE,show_rownames=F)
 
-pheatmap(t(fo.matrix),annotation_col = annotes,show_rownames=F,
+pheatmap(t(fo.matrix),annotation_col = annotes,show_rownames=F,clustering_distance_cols = 'correlation',clustering_method = 'ward.D2',
          scale='row',show_colnames=FALSE,filename = 'allFeatHeatmap.pdf')
 
 library(ggfortify)
@@ -154,11 +154,34 @@ Here we can see that there is good separation between normal and pathological ly
 
 Can we identify features that predict LN class or LN level?
 
+### Predictive model of lymph node state
 
 ```{r find predictors,warning=FALSE,error=FALSE,message=FALSE}
+require(glmnet)
 
-library(glmnet)
-##how should we select features???
+ipats<-annotes%>%subset(class%in%c('Norm','Path'))%>%
+  dplyr::select(class)%>%
+  mutate(class=as.numeric(class)/2-0.5)
+
+cv.res <-cv.glmnet(x=as.matrix(fo.matrix[rownames(ipats),]),y=ipats$class,alpha=0.5,nfolds = 20,type.measure='mse',family='binomial')
+
+best.res<-data.frame(lambda=cv.res$lambda,MSE=cv.res$cvm)%>%
+    subset(MSE==min(MSE))
+  
+try(full.res<-glmnet(x=as.matrix(fo.matrix[rownames(ipats),]),y=ipats$class,alpha=0.5,family='binomial',type.measure='mse'))
+
+preds <- predict.glmnet(full.res,newx=as.matrix(fo.matrix[rownames(ipats),]))[,which(full.res$lambda==best.res$lambda)]
+
+feats=names(which(full.res$beta[,which(full.res$lambda==best.res$lambda)]!=0))##how should we select features???
+
+cv = cor(preds,ipats$class,use='pairwise.complete.obs',method='spearman')
+
+cv
+
+pheatmap(t(fo.matrix[,feats]),annotation_col = annotes,scale='row',show_colnames=FALSE,show_rownames=T,clustering_distance_cols = 'correlation',clustering_method = 'ward.D2')
+
+pheatmap(t(fo.matrix[,feats]),annotation_col = annotes,scale='row',show_colnames=FALSE,show_rownames=T,clustering_distance_cols = 'correlation',clustering_method = 'ward.D2',filename='selectedFeatImgLNheatmap.pdf')
+
 
 
 ```
