@@ -17,15 +17,19 @@ imgFeat <- imgFeat %>%
   pivot_longer(3:ncol(imgFeat),names_to='patient',values_to='value')
 
 ##read in proteomics
-impProts <- read.table('data/S054_HNSCC_imputed_0920.tsv',sep='\t',header=T,check.names=F)
+impProts <- read.table('data/S054_HNSCC_imputed_0920.tsv',sep='\t',header=T,check.names=F)%>%
+  tibble::rownames_to_column('Gene')
+
+obsProts <- read.table('data/S054_HNSCC_observed_0920.tsv',sep='\t',header=T,check.names=F)%>%
+  tibble::rownames_to_column('Gene')
 
 ##convert to long format
 tumProts <- impProts%>%
-  dplyr::select(Gene,ends_with('-T')) 
+  dplyr::select('Gene',ends_with('-T')) 
 
 ##convert to long format
 normProts <- impProts%>%
-  dplyr::select(Gene,ends_with('-N'))
+  dplyr::select('Gene',ends_with('-N'))
 
 normProts <- normProts%>%
   pivot_longer(2:ncol(normProts),names_to='patient',values_to='inferredNormAbund')%>%
@@ -35,10 +39,27 @@ tumProts <- tumProts%>%
   pivot_longer(2:ncol(tumProts),names_to='patient',values_to='inferredTumAbund')%>%
   mutate(patient=stringr::str_remove(patient,'-T'))
 
+#tumTrans <-read.csv('')
+
+##convert to long format
+otumProts <- obsProts%>%
+  dplyr::select('Gene',ends_with('-T')) 
+
+##convert to long format
+onormProts <- obsProts%>%
+  dplyr::select('Gene',ends_with('-N'))
+
+onormProts <- onormProts%>%
+  pivot_longer(2:ncol(onormProts),names_to='patient',values_to='obsNormAbund')%>%
+  mutate(patient=stringr::str_remove(patient,'-N'))
+
+otumProts <-otumProts%>%
+  pivot_longer(2:ncol(otumProts),names_to='patient',values_to='obsTumAbund')%>%
+  mutate(patient=stringr::str_remove(patient,'-T'))
 
 ##can we get clinical too?
-clin.dat<-read.table('data/HNSCC_Feb2021_clinical_data.csv',sep=',',header=T,check.names=F,quote='"')%>%
-  dplyr::select(case_id,contains("lymph_node"))%>%### this gets us 8 different categories
+clin.lymph.dat<-readxl::read_xlsx('data/HNSCC_Feb2021_clinical_data.xlsx')%>%
+                                 dplyr::select(case_id,contains("lymph_node"))%>%### this gets us 8 different categories
   dplyr::rename(extranodal_extension="baseline/lymph_nodes_extranodal_extension",
          staging="baseline/pathologic_staging_regional_lymph_nodes_pn",
          dissection_performed="baseline/lymph_node_neck_dissection_performed",
@@ -52,10 +73,14 @@ clin.dat<-read.table('data/HNSCC_Feb2021_clinical_data.csv',sep=',',header=T,che
   subset(staging!='')%>%
   mutate(staging=toupper(staging))
 
-
+clin.prog.dat<-readxl::read_xlsx('data/HNSCC_Feb2021_clinical_data.xlsx')%>%
+  dplyr::select(patient='case_id',stage='baseline/tumor_stage_pathological',
+                outcome='follow-up/tumor_status_at_date_of_last_contact_or_death')%>%
+  mutate(outcome=sapply(outcome,function(x) rev(unlist(strsplit(x,split='|',fixed=T)))[1]))
+  
 
 ##reduced clinical data
-red.dat<-clin.dat%>%
+red.dat<-clin.lymph.dat%>%
   select(patient,staging,positive_by_he)
 
 red.dat$lnCounts<-sapply(red.dat$positive_by_he,function(x) ifelse(x==0,'zeroLN',ifelse(x>2,'moreThanTwo','oneOrTwo')))
@@ -64,8 +89,11 @@ red.dat$lnSpread<-sapply(red.dat$positive_by_he,function(x) ifelse(x==0,'zeroLN'
 ##now combine the abundances to the same table
 fullProts <- normProts%>%inner_join(tumProts,by=c('Gene','patient'))%>%
   mutate(tumNormDiff=inferredTumAbund/inferredNormAbund)%>%
-  left_join(clin.dat,by='patient')
+  left_join(clin.lymph.dat,by='patient')
 
+clinProts <-normProts%>%inner_join(tumProts,by=c('Gene','patient'))%>%
+  mutate(tumNormDiff=inferredTumAbund/inferredNormAbund)%>%
+  left_join(clin.prog.dat,by='patient')
 
 ##helper functions
 ##quick function to do PCA on a column value
@@ -82,4 +110,4 @@ pcaFromDf<-function(df,column){
 
 
 ## read in gene list
-invList <-read.table('data/pouliquenEtAlProteins.tsv',sep='\t',header=T,check.names=F)
+#invList <-read.table('data/pouliquenEtAlProteins.tsv',sep='\t',header=T,check.names=F)
